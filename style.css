@@ -1,0 +1,143 @@
+body { font-family: 'Inter', sans-serif; scroll-behavior: smooth; transition: background-color 0.3s ease, color 0.3s ease; }
+        .medical-blue { background-color: #1e40af; }
+        .card-shadow { box-shadow: 0 10px 40px rgba(30, 64, 175, 0.08); }
+        .dark .card-shadow { box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3); }
+        
+        @keyframes heartPulse {
+            0% { transform: scale(1); opacity: 0.8; }
+            50% { transform: scale(1.05); opacity: 1; }
+            100% { transform: scale(1); opacity: 0.8; }
+        }
+        .animate-rcp { animation: heartPulse 0.54s infinite; }
+
+        @keyframes visualPulse {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(30, 64, 175, 0.4); }
+            70% { transform: scale(1.1); box-shadow: 0 0 0 20px rgba(30, 64, 175, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(30, 64, 175, 0); }
+        }
+        .pulse-active { animation: visualPulse 0.54s infinite; }
+
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        .dark ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #1e40af; border-radius: 10px; }
+
+        .illustration-grid {
+            background-image: radial-gradient(#e2e8f0 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        .dark .illustration-grid {
+            background-image: radial-gradient(#334155 1px, transparent 1px);
+        }
+
+        #sidebar { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .sidebar-overlay {
+            display: none;
+            background: rgba(15, 23, 42, 0.5);
+            backdrop-filter: blur(2px);
+            position: fixed;
+            inset: 0;
+            z-index: 60;
+        }
+        .sidebar-overlay.active { display: block; }
+
+        .perspective { perspective: 1000px; }
+        .flashcard-inner {
+            transition: transform 0.6s;
+            transform-style: preserve-3d;
+            cursor: pointer;
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+        .flashcard-container.flipped .flashcard-inner { transform: rotateY(180deg); }
+        .flashcard-front, .flashcard-back {
+            backface-visibility: hidden;
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            border-radius: 2rem;
+            padding: 2rem;
+        }
+        .flashcard-back { transform: rotateY(180deg); }
+
+        .view-section { display: none; }
+        .view-section.active { display: block; animation: fadeIn 0.4s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .quiz-option { transition: all 0.2s ease; }
+        .quiz-option:active { transform: scale(0.98); }
+
+        .step-item { position: relative; padding-left: 3.5rem; margin-bottom: 1.5rem; }
+        .step-number {
+            position: absolute;
+            left: 0; top: 0;
+            width: 2.2rem; height: 2.2rem;
+            background: #1e40af;
+            color: white;
+            border-radius: 0.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            font-weight: 900;
+        }
+
+        .ovace-media-container {
+            position: relative;
+            padding-bottom: 56.25%;
+            height: 0;
+            overflow: hidden;
+            border-radius: 2.5rem;
+        }
+        .ovace-media-container iframe, .ovace-media-container img {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            object-fit: cover;
+        }
+
+        /* Estilo para Acordeão */
+        .accordion-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out, padding 0.3s ease;
+        }
+        .accordion-item.active .accordion-content {
+            max-height: 500px;
+            padding-bottom: 1.5rem;
+        }
+        .accordion-item.active .accordion-icon {
+            transform: rotate(180deg);
+        }
+
+        /* Na Prática Highlight */
+        .practice-card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+        }
+        .dark .practice-card {
+            background: #0f172a;
+            border: 1px solid #1e293b;
+        }
+/* Isso deve ficar no arquivo CSS, nunca no JS */
+#sidebar {
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 60;
+    pointer-events: none;
+}
+
+.sidebar-overlay.active {
+    display: block;
+    pointer-events: auto;
+}
