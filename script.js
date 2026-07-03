@@ -1,24 +1,202 @@
-// REMOVA TODOS OS IMPORTS DO FIREBASE DO TOPO
-// O arquivo deve começar diretamente com as definições das variáveis globais:
-
 const appId = 'lifesupport-pro-v1';
-let currentUser = null;
+let currentuser = null;
 let attempts = [];
 let currentQIndex = 0;
 let currentFIndex = 0; 
 let sessionResults = [];
 let finalExamResults = [];
 let learningChartInstance = null;
+let currentPreIndex = 0;
+let preTestResults = [];
+
+// LOGICA DO SUPABASE (Sessão Global)
+document.addEventListener('DOMContentLoaded', async () => {
+    // 1. Verifica Sessão
+    const session = await window.getSession();
+    if(session && session.user) {
+        updateSidebarForuser(session.user);
+        if(window.closeAuthModal) window.closeAuthModal();
+    }
+    
+    // 2. Sempre verifica a fase do estudo para exibir o overlay correto (TCLE, Perfil, etc)
+    window.checkStudyPhase();
+
+    // 3. Lógica Entrar
+    const loginForm = document.getElementById('login-form');
+    if(loginForm) {
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('btn-login-submit');
+            btn.textContent = "Carregando...";
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            
+            const { data, error } = await window.supabaseClient.auth.signInWithPassword({ email, password });
+            
+            if(error) {
+                alert(`Erro: ${error.message}`);
+                btn.textContent = "Entrar";
+            } else {
+                alert("Autenticado com sucesso!");
+                location.reload();
+            }
+        });
+    }
+
+    // 4. Lógica Cadastro
+    const regForm = document.getElementById('register-form');
+    if(regForm) {
+        regForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('btn-reg-submit');
+            btn.textContent = "Carregando...";
+            const email = document.getElementById('reg-email').value;
+            const password = document.getElementById('reg-password').value;
+            
+            const { data, error } = await window.supabaseClient.auth.signUp({ email, password });
+            
+            if(error) {
+                alert(`Erro: ${error.message}`);
+                btn.textContent = "Registrar";
+            } else {
+                alert('CONTA CRIADA COM SUCESSO!\n\nUm link de confirmação poderá ter sido enviado para o seu e-mail (caso a validação de segurança esteja ativa no seu banco de dados). \n\nAgora, por favor, clique em OK e faça o seu login com a conta recém criada para prosseguir!');
+                btn.textContent = "Registrar";
+                if(window.toggleAuthView) window.toggleAuthView('login');
+            }
+        });
+    }
+
+    // Lógica para o TCLE agora é de aceite direto para evitar bloqueios
+});
+
+
+function updateSidebarForuser(user) {
+    const loginBtn = document.getElementById('sidebar-login-btn');
+    const logoutBtn = document.getElementById('sidebar-logout-btn');
+    
+    if (loginBtn && logoutBtn) {
+        loginBtn.textContent = user.email.split('@')[0]; // Mostra nickname
+        loginBtn.classList.remove('bg-blue-700', 'hover:bg-blue-800', 'text-white');
+        loginBtn.classList.add('bg-slate-100', 'text-blue-700', 'dark:bg-slate-800', 'dark:text-blue-400');
+        loginBtn.onclick = null;
+        
+        logoutBtn.classList.remove('hidden');
+    }
+}
 
 // Coloque esta função aqui para evitar erros de histórico vazio
-window.renderDashboard = () => { console.log("Modo offline ativo."); };
+window.renderDashboard = async () => {
+    console.log("Renderizando Dashboard...");
+    const session = await window.checkSession();
+    let history = [];
+    
+    // Obter dados: Nuvem ou Local?
+    if (session && session.user) {
+        document.getElementById('auth-status-text').textContent = "Sincronizado na Nuvem";
+        document.getElementById('auth-status-text').classList.replace('text-blue-600', 'text-emerald-600');
+        document.getElementById('auth-status-text').classList.replace('bg-blue-50', 'bg-emerald-50');
+        
+        const { data, error } = await window.supabaseClient
+            .from('quiz_attempts')
+            .select('*')
+            .eq('user_id', session.user.id)
+            .order('date', { ascending: true });
+        
+        if (!error && data) history = data;
+    } else {
+        document.getElementById('auth-status-text').textContent = "Modo Off-line (Local)";
+        history = JSON.parse(localStorage.getItem('bls_quiz_attempts')) || [];
+    }
+
+    const placeholder = document.getElementById('stats-placeholder');
+    const container = document.getElementById('stats-container');
+
+    if (!history || history.length === 0) {
+        if(placeholder) placeholder.classList.remove('hidden');
+        if(container) container.classList.add('hidden');
+        return;
+    }
+
+    if(placeholder) placeholder.classList.add('hidden');
+    if(container) container.classList.remove('hidden');
+
+    // Cálculos
+    const validAttempts = history.filter(a => a.percent !== undefined); // Evita NaN
+    const avgScore = validAttempts.length ? Math.round(validAttempts.reduce((acc, a) => acc + a.percent, 0) / validAttempts.length) : 0;
+    const bestScore = validAttempts.length ? Math.max(...validAttempts.map(a => a.percent)) : 0;
+    const latestScore = validAttempts.length ? validAttempts[validAttempts.length - 1].percent : 0;
+
+    document.getElementById('total-attempts').innerText = validAttempts.length;
+    document.getElementById('avg-score').innerText = avgScore + '%';
+    document.getElementById('best-score').innerText = bestScore + '%';
+    document.getElementById('latest-score').innerText = latestScore + '%';
+
+    // Gráfico Chart.js
+    const ctxEls = document.getElementById('learningChart');
+    if(ctxEls) {
+        const ctx = ctxEls.getContext('2d');
+        if (learningChartInstance) {
+            learningChartInstance.destroy();
+        }
+
+        learningChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: validAttempts.map((_, i) => 'Teste ' + (i + 1)),
+                datasets: [{
+                    label: 'Score Geral (%)',
+                    data: validAttempts.map(a => a.percent),
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.4,
+                    pointBackgroundColor: '#fff',
+                    pointBorderColor: '#2563eb',
+                    pointBorderWidth: 2,
+                    pointRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, max: 100 }
+                },
+                plugins: {
+                    legend: { display: false }
+                }
+            }
+        });
+    }
+
+    // Lista de Histórico
+    const historyList = document.getElementById('history-list');
+    if(historyList) {
+        historyList.innerHTML = validAttempts.slice().reverse().map((a, i) => {
+            const d = new Date(a.date);
+            const formatD = d.toLocaleDateString();
+            const typeTranslate = a.type === 'simulado' ? 'Simulação Prática' : 'Avaliação Final';
+            const isPass = a.percent >= 80;
+            return `
+                <div class="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700">
+                    <div>
+                        <p class="font-bold text-slate-800 dark:text-slate-200 text-sm">${typeTranslate}</p>
+                        <p class="text-[10px] text-slate-500 uppercase">${formatD}</p>
+                    </div>
+                    <div class="font-black ${isPass ? 'text-emerald-600' : 'text-rose-600'} text-lg">${a.percent}%</div>
+                </div>
+            `;
+        }).join('');
+    }
+};
 
 // ACORDEÃO
 window.toggleAccordion = (button) => {
     const item = button.parentElement;
-    const isActive = item.classList.contains('active');
+    const isactive = item.classList.contains('active');
     document.querySelectorAll('.accordion-item').forEach(i => i.classList.remove('active'));
-    if (!isActive) {
+    if (!isactive) {
         item.classList.add('active');
     }
 };
@@ -43,7 +221,7 @@ window.toggleTheme = () => {
         }
     }
     
-    // 4. Salva no navegador para não perder ao recarregar
+    // 4. Salva não navegador para não perder ao recarregar
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
 };
 
@@ -134,65 +312,9 @@ window.triggerPulse = () => {
     }
 };
 
-// DADOS QUIZ
-const quizQuestions = [
-    { cat: "Segurança", q: "Qual a prioridade absoluta ao abordar uma vítima caída?", opts: ["Pulso.", "Segurança cena.", "Iniciar RCP.", "Gritar."], correct: 1, explanation: "Segurança zero: não se torne uma vítima." },
-    { cat: "Avaliação", q: "Como testar responsividade de um adulto?", opts: ["Tapa.", "Chamar e bater ombros.", "Sacudir tronco.", "Gritar perto."], correct: 1, explanation: "Firmeza nos ombros e voz alta." },
-    { cat: "Leigos", q: "Qual é a recomendação para leigos não treinados em RCP?", opts: ["Ventilar.", "Só compressão.", "Fazer 30:2.", "Esperar parado."], correct: 1, explanation: "Hands-Only simplifica e oxigena." },
-    { cat: "Técnica", q: "Qual é a frequência ideal das compressões?", opts: ["80 BPM.", "100-120 BPM.", "O mais rápido.", "60 BPM."], correct: 1, explanation: "Frequência ótima para perfusão." },
-    { cat: "Técnica", q: "Qual a profundidade ideal das compressões no Adulto?", opts: ["2cm.", "4cm.", "5-6cm.", "8cm."], correct: 2, explanation: "Menos é ineficaz, mais causa trauma." },
-    { cat: "Mecânica", q: "Por que permitir o recuo total do tórax?", opts: ["Descansar.", "Reenchimento cardíaco.", "Evitar dor.", "Sinal de fim."], correct: 1, explanation: "O sangue precisa entrar no coração para sair." },
-    { cat: "Protocolo", q: "Relação C:V Adulto?", opts: ["15:2.", "30:2.", "50:2.", "Só C."], correct: 1, explanation: "Padrão ouro em via aérea básica." },
-    { cat: "Equipamento", q: "DEA chegou. qual é a 1ª ação?", opts: ["Colar pás.", "Ligar.", "Pedir afastar.", "Trocar colega."], correct: 1, explanation: "Ligar inicia o protocolo por voz." },
-    { cat: "OVACE", q: "Vítima tosse ruidosamente. Conduta?", opts: ["Heimlich.", "Bater costas.", "Só encorajar a tosse.", "RCP."], correct: 2, explanation: "Tosse parcial é o mecanismo mais eficaz." },
-    { cat: "Fisiologia", q: "Interpretação do 'Gasping'?", opts: ["Melhora.", "Normal.", "Sinal de PCR.", "Acordando."], correct: 2, explanation: "Não é funcional. Inicie RCP." },
-    { cat: "OVACE", q: "Protocolo desengasgo consciente grave?", opts: ["Só Heimlich.", "5 tapas + 5 compressões.", "Dar água.", "Bater peito."], correct: 1, explanation: "Alternância de pressão integrada." },
-    { cat: "Gestantes", q: "Qual é o local de compressões em gestantes engasgadas?", opts: ["Abdômen.", "Centro tórax.", "Nas pernas.", "Só tapas."], correct: 1, explanation: "Anatomia impede manobra abdominal." },
-    { cat: "Lactentes", q: "Qual é a conduta adequada para desengasgo Bebê (< 1 ano)?", opts: ["Heimlich.", "Elevar pernas.", "5 tapas + 5 comp peito.", "Sacudir."], correct: 2, explanation: "Heimlich abdominal lesiona órgãos de bebês." },
-    { cat: "Fisiologia", q: "O cérebro sofre dano tecidual por hipóxia após:", opts: ["1 min.", "4-6 min.", "30 min.", "1 hora."], correct: 1, explanation: "Janela crítica de oportunidade." },
-    { cat: "Fadiga", q: "Por que trocar compressor (socorrista) a cada 2 min?", opts: ["Cansaço mental.", "Cansaço físico reduz qualidade.", "Ficha técnica.", "Regra aleatória."], correct: 1, explanation: "Fadiga reduz profundidade mesmo sem dor." }
-];
+// OS DADOS (quizQuestions, finalExamQuestions, flashcards) 
+// FORAM MOVIDOS PARA O ARQUIVO tcc_questions.js PARA FACILITAR SUA EDIÇÃO MANUAL.
 
-const finalExamQuestions = [
-    { level: "Fácil", cat: "Protocolo", q: "Qual o número de emergência para o SAMU no Brasil?", opts: ["190", "192", "193", "911"], correct: 1 },
-    { level: "Fácil", cat: "Segurança", q: "Ao ver uma pessoa caída, qual a primeira coisa a fazer?", opts: ["Checar pulso", "Gritar socorro", "Garantir a segurança da cena", "Fazer respiração"], correct: 2 },
-    { level: "Fácil", cat: "Técnica", q: "Qual a relação compressão:ventilação recomendada para um adulto?", opts: ["15:2", "30:2", "30:5", "Apenas 100 compressões"], correct: 1 },
-    { level: "Fácil", cat: "Equipamento", q: "O que significa a sigla DEA?", opts: ["Dispositivo Elétrico de Apoio", "Desfibrilador Externo Automático", "Detector de Espasmo Agudo", "Diretriz de Emergência Aplicada"], correct: 1 },
-    { level: "Fácil", cat: "OVACE", q: "Qual o sinal universal de asfixia/engasgo?", opts: ["Mão no peito", "Mãos no pescoço", "Mão na testa", "Apontar para a boca"], correct: 1 },
-    { level: "Média", cat: "Técnica", q: "Qual a frequência correta de compressões no SBV Adulto?", opts: ["60 a 80 por minuto", "80 a 100 por minuto", "100 a 120 por minuto", "O mais rápido possível"], correct: 2 },
-    { level: "Média", cat: "Fisiologia", q: "A 'Morte Clínica' é considerada:", opts: ["Estado irreversível", "Estado de morte cerebral confirmada", "Estado reversível logo após a parada", "Estado após 20 minutos de PCR"], correct: 2 },
-    { level: "Média", cat: "Técnica", q: "Qual a profundidade ideal das compressões em um adulto?", opts: ["Mínimo 2 cm", "Entre 5 e 6 cm", "Mínimo 8 cm", "Depende do peso da vítima"], correct: 1 },
-    { level: "Média", cat: "Avaliação", q: "Como verificar a responsividade em um lactente (bebê)?", opts: ["Sacudir o tronco", "Chamar pelo nome alto", "Bater na planta dos pés", "Pressionar o esterno"], correct: 2 },
-    { level: "Média", cat: "Equipamento", q: "Assim que o DEA chega ao local, qual o primeiro passo?", opts: ["Colar as pás", "Ligar o aparelho", "Pedir para parar a RCP", "Checar a bateria"], correct: 1 },
-    { level: "Média", cat: "OVACE", q: "Se uma vítima de engasgo tosse ruidosamente, você deve:", opts: ["Fazer manobra de Heimlich", "Dar tapas nas costas", "Estimular a tosse", "Oferecer água"], correct: 2 },
-    { level: "Média", cat: "Leigos", q: "O termo 'Hands-Only' refere-se a:", opts: ["RCP sem ajuda de aparelhos", "RCP focada apenas em compressões", "Uso exclusivo do DEA", "Manobra de desengasgo manual"], correct: 1 },
-    { level: "Difícil", cat: "Fisiologia", q: "Após quantos minutos sem oxigênio a morte biológica geralmente se instala?", opts: ["2 minutos", "4 minutos", "10 minutos", "30 minutos"], correct: 2 },
-    { level: "Difícil", cat: "OVACE", q: "Qual a sequência da manobra para desengasgo de lactentes?", opts: ["Apenas Heimlich", "5 tapas no dorso + 5 compressões torácicas", "10 compressões abdominais", "Sacudir o bebê pelas pernas"], correct: 1 },
-    { level: "Difícil", cat: "Técnica", q: "Por que deve-se trocar o compressor a cada 2 minutos?", opts: ["Para o colega aprender", "Para evitar queda na qualidade por fadiga", "Regra de protocolo sem base física", "Para checar o pulso"], correct: 1 },
-    { level: "Difícil", cat: "OVACE", q: "Vítima de engasgo total perde a consciência. Próximo passo?", opts: ["Tentar Heimlich no chão", "Abrir a boca e varrer com o dedo", "Deitar a vítima e iniciar 30 compressões", "Esperar o SAMU chegar"], correct: 2 },
-    { level: "Difícil", cat: "Gestantes", q: "Onde aplicar as compressões de Heimlich em uma gestante avançada?", opts: ["No abdômen superior", "No centro do tórax (esterno)", "Nas costas", "Na pelve"], correct: 1 },
-    { level: "Difícil", cat: "Protocolo", q: "Na Cadeia de Sobrevivência Intra-hospitalar, o primeiro elo é:", opts: ["RCP precoce", "Desfibrilação", "Vigilância e Prevenção", "Cuidados Pós-PCR"], correct: 2 },
-    { level: "Difícil", cat: "Fisiologia", q: "Qual a importância do recuo total do tórax entre compressões?", opts: ["Descanso do socorrista", "Permitir o reenchimento das câmaras cardíacas", "Prevenir quebra de costelas", "Aumentar a ventilação"], correct: 1 },
-    { level: "Difícil", cat: "Avaliação", q: "No suporte profissional, o tempo máximo para checar pulso/respiração é:", opts: ["5 segundos", "10 segundos", "20 segundos", "1 minuto"], correct: 1 }
-];
-
-const flashcards = [
-    { front: "Ritmo RCP Adulto", back: "100-120 BPM", sub: "Ritmo de 'Stayin Alive'", cat: "Técnica" },
-    { front: "C : V Adulto", back: "30 : 2", sub: "30 Compressões : 2 Sopros", cat: "Protocolo" },
-    { front: "Profundidade Adulto", back: "5 - 6 cm", sub: "Recuo total necessário", cat: "Técnica" },
-    { front: "Manobra Bebê", back: "5 Tapas + 5 Comp.", sub: "Cabeça mais baixa que o tronco", cat: "OVACE" },
-    { front: "Morte Biológica", back: "10 Minutos", sub: "Estado de irreversibilidade", cat: "Fisiologia" },
-    { front: "Testar Resposta", back: "Chamar / Bater", sub: "Ombros por 10s", cat: "Avaliação" },
-    { front: "Sigla DEA", back: "Desfibrilador Externo Automático", sub: "Equipamento eletrônico portátil", cat: "Equipamento" },
-    { front: "Troca de Socorrista", back: "A cada 2 Minutos", sub: "Evita exaustão e queda de qualidade", cat: "Técnica" },
-    { front: "Local Compressão", back: "Centro do Peito", sub: "Metade inferior do osso esterno", cat: "Técnica" },
-    { front: "Profundidade Criança", back: "Cerca de 5 cm", sub: "Ou 1/3 do diâmetro do tórax", cat: "Técnica" },
-    { front: "Profundidade Lactente", back: "Cerca de 4 cm", sub: "Ou 1/3 do diâmetro do tórax", cat: "Técnica" },
-    { front: "Sinal de Asfixia", back: "Mãos no Pescoço", sub: "Sinal universal de engasgo total", cat: "OVACE" },
-    { front: "C : V Criança (2 Soc.)", back: "15 : 2", sub: "15 Compressões : 2 Sopros", cat: "Protocolo" },
-    { front: "Número do SAMU", back: "192", sub: "Serviço de Urgência no Brasil", cat: "Acionamento" },
-    { front: "Recuo do Tórax", back: "Permitir Enchimento", sub: "O sangue precisa retornar ao coração", cat: "Mecânica" }
-];
 
 const protocolsData = {
     extra: [
@@ -201,7 +323,7 @@ const protocolsData = {
         { id: 3, title: "Desfibrilação", color: "bg-blue-600", steps: ["Ligar DEA imediatamente assim que chegar.", "Seguir instruções de voz: Cole as pás no tórax nu.", "Gritar 'Afastem-se' durante a análise e o disparo.", "Retomar RCP logo após o choque sem parar para checar pulso."], rationale: "O choque precoce em ritmos chocáveis (FV/TV) é o único tratamento definitivo.", practice: { pro: "Se houver suor, seque o tórax. Se houver pelos excessivos, use o barbeador ou a própria pá para depilar. Garanta que ninguém toca na vítima durante a análise do ritmo.", nonpro: "Ligue o aparelho e faça exatamente o que ele mandar por voz. Ele vai te guiar em cada passo. Não tenha medo de dar o choque se o aparelho mandar, ele é seguro." } },
         { id: 4, title: "Suporte Avançado", color: "bg-blue-600", steps: ["Relatar tempo de PCR e número de choques aplicados.", "Manejo profissional: Intubação e acesso venoso pela equipe.", "Continuidade: Não interromper manobras até transferência completa."], rationale: "A estabilização avançada otimiza o fluxo e trata as causas reversíveis específicas.", practice: { pro: "Informe rapidamente à equipe: tempo estimado de parada, ciclos realizados e choques entregues. Continue a RCP até que eles assumam explicitamente.", nonpro: "Quando a ambulância chegar, continue ajudando até os paramédicos pedirem para você se afastar. Conte a eles o que você viu acontecer." } },
         { id: 5, title: "Pós-PCR", color: "bg-blue-600", steps: ["UTI: Monitorar estabilidade hemodinâmica sistêmica.", "Neuroproteção: Iniciar controle direcionado de temperatura.", "Causa Base: Tratar a patologia original (Ex: Infarto)."], rationale: "Fase crítica para prevenir a síndrome pós-PCR e falência multiorgânica.", practice: { pro: "Mantenha o monitoramento rigoroso. Se houver retorno da circulação, coloque em posição lateral se não houver trauma. Prepare para o transporte assistido.", nonpro: "Se a pessoa voltar a respirar, vire-a de lado com cuidado até a ajuda chegar para que ela não se engasgue." } },
-        { id: 6, title: "Recuperação", color: "bg-blue-800", steps: ["Reabilitação motora e avaliação cognitiva precoce.", "Acompanhamento psicológico para o sobrevivente e família.", "Plano de alta multidisciplinar com orientações preventivas."], rationale: "A sobrevivência não termina na alta; o foco final é a funcionalidade social.", practice: { pro: "Inicie avaliação de danos neurológicos e coordene com a fisioterapia. Realize o debriefing com a equipe que participou do socorro.", nonpro: "Depois que tudo passar, procure conversar com alguém sobre como você se sente. Salvar uma vida é emocionante, mas também pode ser estressante." } }
+        { id: 6, title: "Recuperação", color: "bg-blue-800", steps: ["Reabilitação motora e Avaliação cognitiva precoce.", "Acompanhamento psicológico para o sobrevivente e família.", "Plano de alta multidisciplinar com orientações preventivas."], rationale: "A sobrevivência não termina na alta; o foco final é a funcionalidade social.", practice: { pro: "Inicie Avaliação de danos neurológicos e coordene com a fisioterapia. Realize o debriefing com a equipe que participou do socorro.", nonpro: "Depois que tudo passar, procure conversar com alguém sobre como você se sente. Salvar uma vida é emocionante, mas também pode ser estressante." } }
     ],
     intra: [
         { id: 1, title: "Vigilância", color: "bg-emerald-600", steps: ["Monitorar sinais vitais e tendências de deterioração clínica.", "Aplicação de escores de alerta (NEWS/MEWS) sistemáticos.", "Acionamento preventivo do Time de Resposta Rápida (TRR)."], rationale: "Detectar o choque ou hipóxia ANTES da parada hospitalar reduz mortalidade.", practice: { pro: "Utilize escores de alerta (como o NEWS) em cada rodada de sinais vitais para detectar riscos precocemente. Se a pontuação subir, não espere a parada; chame o Time de Resposta Rápida.", nonpro: "Ao notar um paciente ou visitante muito ofegante, com a pele arroxeada ou que parou de responder, avise a equipe de enfermagem do posto mais próximo imediatamente." } },
@@ -236,6 +358,75 @@ window.switchChain = (t) => {
     if(be) be.className = t === 'extra' ? 'px-8 py-3 rounded-xl font-bold bg-blue-700 text-white shadow-lg' : 'px-8 py-3 rounded-xl font-bold text-slate-500 border border-slate-200';
     if(bi) bi.className = t === 'intra' ? 'px-8 py-3 rounded-xl font-bold bg-emerald-600 text-white shadow-lg' : 'px-8 py-3 rounded-xl font-bold text-slate-500 border border-slate-200';
     window.showEloDetail(t, 0);
+
+    // Update Flow navigation Destination
+    const btnNextTeoria = document.getElementById('btn-next-teoria');
+    const labelNextTeoria = document.getElementById('label-next-teoria');
+    const iconNextTeoria = document.getElementById('icon-next-teoria');
+    if (btnNextTeoria && labelNextTeoria && iconNextTeoria) {
+        if (t === 'extra') {
+            btnNextTeoria.setAttribute('onclick', "window.switchChain('intra'); window.scrollTo(0,0);");
+            btnNextTeoria.className = "group flex items-center bg-emerald-50 dark:bg-slate-800 border border-emerald-100 dark:border-slate-700 hover:border-emerald-300 dark:hover:border-emerald-500 rounded-2xl p-4 transition-all hover:scale-105 shadow-sm hover:shadow-md";
+            labelNextTeoria.className = "font-bold text-emerald-700 dark:text-emerald-400";
+            labelNextTeoria.innerText = "Intra-hospitalar (PCRIH)";
+            iconNextTeoria.className = "w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center group-hover:bg-emerald-700 transition-colors";
+        } else {
+            btnNextTeoria.setAttribute('onclick', "window.showView('diferencas');");
+            btnNextTeoria.className = "group flex items-center bg-purple-50 dark:bg-slate-800 border border-purple-100 dark:border-slate-700 hover:border-purple-300 dark:hover:border-purple-500 rounded-2xl p-4 transition-all hover:scale-105 shadow-sm hover:shadow-md";
+            labelNextTeoria.className = "font-bold text-purple-700 dark:text-purple-400";
+            labelNextTeoria.innerText = "Grupos específicos";
+            iconNextTeoria.className = "w-10 h-10 rounded-xl bg-purple-600 text-white flex items-center justify-center group-hover:bg-purple-700 transition-colors";
+        }
+    }
+};
+
+window.getEloMediaHTML = (t, elo) => {
+    // Se houver ID do YouTube configurado
+    if (elo.youtubeId) {
+        return `
+            <div class="relative w-full h-full rounded-[2rem] overflow-hidden shadow-lg bg-black aspect-video min-h-[260px]">
+                <iframe class="absolute top-0 left-0 w-full h-full border-0" 
+                    src="https://www.youtube.com/embed/${elo.youtubeId}?rel=0&modestbranding=1" 
+                    title="${elo.title}" 
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                    allowfullscreen>
+                </iframe>
+            </div>
+        `;
+    }
+    // Se houver imagem local ou online configurada
+    if (elo.imageUrl) {
+        return `
+            <div class="w-full h-full rounded-[2rem] overflow-hidden shadow-md bg-slate-100 dark:bg-slate-800 min-h-[260px]">
+                <img src="${elo.imageUrl}" alt="${elo.title}" class="w-full h-full object-cover">
+            </div>
+        `;
+    }
+    
+    // Vetores SVG temáticos (fallback interativo e responsivo)
+    let svgIcon = "";
+    if (elo.id === 1 && t === 'extra') { // Acionamento Extra (Telefone/Ambulância)
+        svgIcon = `<svg class="w-20 h-20 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.94.725l.548 2.2a1 1 0 01-.321.988l-1.305.98a10.582 10.582 0 004.872 4.872l.98-1.305a1 1 0 01.988-.321l2.2.548a1 1 0 01.725.94V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path></svg>`;
+    } else if (elo.id === 1 && t === 'intra') { // Vigilância/Sinais Vitais
+        svgIcon = `<svg class="w-20 h-20 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 012-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>`;
+    } else if (elo.id === 2) { // RCP Precoce (Massagem Cardíaca / Mão sobre Peito)
+        svgIcon = `<svg class="w-20 h-20 text-red-500 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>`;
+    } else if (elo.id === 3) { // Desfibrilação (DEA / Eletricidade)
+        svgIcon = `<svg class="w-20 h-20 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>`;
+    } else if (elo.id === 4) { // Suporte Avançado / Carrinho (Suporte Profissional)
+        svgIcon = `<svg class="w-20 h-20 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>`;
+    } else if (elo.id === 5) { // Cuidados Pós-PCR (Cérebro/Escudo/Recuperação)
+        svgIcon = `<svg class="w-20 h-20 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>`;
+    } else { // Recuperação Geral
+        svgIcon = `<svg class="w-20 h-20 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
+    }
+
+    return `
+        <div class="w-full h-full flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-800/30 rounded-[2rem] border border-slate-150 dark:border-slate-800 transition-all text-center min-h-[260px]">
+            <div class="p-4 bg-white dark:bg-slate-900 rounded-full shadow-sm border border-slate-100 dark:border-slate-800/50 mb-3">${svgIcon}</div>
+            <p class="text-[10px] text-slate-400 dark:text-slate-500 font-bold max-w-[200px] leading-snug">Ilustração do Elo ${elo.id}. Adicione <code>youtubeId</code> ou <code>imageUrl</code> no código para carregar seu vídeo/foto.</p>
+        </div>
+    `;
 };
 
 window.showEloDetail = (t, i) => {
@@ -244,8 +435,8 @@ window.showEloDetail = (t, i) => {
     if(!content) return;
     const isIntra = t === 'intra';
     content.innerHTML = `
-        <div class="flex flex-col lg:flex-row gap-12 items-start transition-all animate-in slide-in-from-left">
-            <div class="lg:w-1/2 text-left">
+        <div class="flex flex-col lg:flex-row gap-12 items-center transition-all animate-in slide-in-from-left">
+            <div class="lg:w-1/2 text-left w-full">
                 <div class="w-12 h-12 ${elo.color} rounded-xl mb-4 flex items-center justify-center text-white font-black">0${elo.id}</div>
                 <h3 class="text-3xl font-black ${isIntra ? 'text-emerald-900 dark:text-emerald-500' : 'text-blue-900 dark:text-blue-400'} mb-4 uppercase italic">${elo.title}</h3>
                 <div class="space-y-4 mb-6">
@@ -255,8 +446,8 @@ window.showEloDetail = (t, i) => {
                     ${elo.rationale}
                 </div>
             </div>
-            <div class="lg:w-1/2 w-full h-64 bg-slate-50 dark:bg-slate-800/50 rounded-[2.5rem] illustration-grid border-2 border-dashed border-slate-200 flex items-center justify-center text-slate-300 italic">
-                Área de Visualização Técnica
+            <div class="lg:w-1/2 w-full flex-shrink-0">
+                ${window.getEloMediaHTML(t, elo)}
             </div>
         </div>
         <div class="mt-8 space-y-6">
@@ -312,36 +503,108 @@ window.renderQuestion = () => {
             <h3 class="text-2xl font-black mb-10 leading-tight text-blue-950 dark:text-blue-400">${q.q}</h3>
             <div class="space-y-4">
                 ${q.opts.map((o, i) => `
-                    <button onclick="window.submitAnswer(${i})" class="quiz-option w-full text-left p-6 rounded-3xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 hover:border-blue-400 hover:bg-blue-50 flex items-center group transition-all">
-                        <span class="w-10 h-10 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center mr-6 font-black group-hover:bg-blue-600 group-hover:text-white">${i+1}</span>
-                        <span class="font-bold text-slate-700 dark:text-slate-300 uppercase text-xs">${o}</span>
-                    </button>
+                    <label class="flex items-center gap-3 cursor-pointer p-4 bg-white dark:bg-slate-900 border rounded-xl hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 border-slate-200 dark:border-slate-700 transition-all font-bold has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50 dark:has-[:checked]:bg-blue-900/50 has-[:checked]:text-blue-700 dark:has-[:checked]:text-blue-400">
+                        <input type="radio" name="simulado_q" value="${i}" class="w-5 h-5 text-blue-600">
+                        <span class="text-slate-700 dark:text-slate-300">${o}</span>
+                    </label>
                 `).join('')}
-            </div>`;
+            </div>
+            <button onclick="window.submitAnswer()" class="w-full bg-blue-700 text-white px-8 py-4 rounded-xl font-black uppercase tracking-wide mt-6 transition-all shadow-xl">Avançar</button>
+            <div class="mt-8 flex justify-between items-center w-full">
+                ${currentQIndex > 0 ? `
+                <button onclick="window.prevQuestion()" class="flex items-center space-x-2 text-slate-500 hover:text-blue-700 font-bold transition-all">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                    <span>Voltar Anterior</span>
+                </button>
+                ` : '<div></div>'}
+                <button onclick="window.submitAnswer(-1)" class="flex items-center space-x-2 text-slate-400 hover:text-slate-600 font-bold transition-all">
+                    <span>Pular Questão</span>
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7"></path></svg>
+                </button>
+            </div>
+            `;
     }
 };
 
-window.submitAnswer = (i) => {
+window.prevQuestion = () => {
+    if (currentQIndex > 0) {
+        currentQIndex--;
+        sessionResults.pop(); // remove a última tentativa armazenada para recadastrar
+        window.renderQuestion();
+    }
+};
+window.submitAnswer = (idxManual) => {
     const q = quizQuestions[currentQIndex];
-    sessionResults.push({ category: q.cat, correct: i === q.correct, questionIndex: currentQIndex });
+    let i = idxManual;
+    
+    if (i === undefined) {
+        const selected = document.querySelector('input[name="simulado_q"]:checked');
+        if (!selected) {
+            alert("Por favor, selecione uma opção ou clique em Pular.");
+            return;
+        }
+        i = parseInt(selected.value);
+    }
+
+    const isCorrect = (i === -1) ? false : (i === q.correct);
+    sessionResults.push({ category: q.cat, correct: isCorrect, QuestionIndex: currentQIndex, skipped: (i === -1) });
     
     if (currentQIndex < quizQuestions.length - 1) {
         currentQIndex++; 
         window.renderQuestion();
     } else {
-        const score = Math.round((sessionResults.filter(r => r.correct).length / quizQuestions.length) * 100);
+        const correctCount = sessionResults.filter(r => r.correct).length;
+        const score = Math.round((correctCount / quizQuestions.length) * 100);
+        
+        window.saveEvaluationResult('simulado', score, correctCount, quizQuestions.length);
+
         const ui = document.getElementById('quiz-ui');
         const intro = document.getElementById('quiz-intro');
         if(ui) ui.classList.add('hidden');
         if(intro) {
             intro.classList.remove('hidden');
-            const feedbackList = window.getFeedbackHTML(sessionResults, quizQuestions);
+            
+            // Gerar feedback de erros
+            let errorsHTML = '';
+            const errors = sessionResults.filter(r => !r.correct);
+            if (errors.length > 0) {
+                errorsHTML = `
+                    <div class="mt-10 text-left bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 border border-slate-100 dark:border-slate-800 shadow-sm">
+                        <h4 class="text-xl font-black text-rose-600 mb-6 uppercase italic tracking-tighter">Pontos de Melhoria</h4>
+                        <div class="space-y-6">
+                            ${errors.map(err => {
+                                const qObj = quizQuestions[err.QuestionIndex];
+                                return `
+                                    <div class="pb-6 border-b border-slate-50 dark:border-slate-800 last:border-0">
+                                        <p class="font-bold text-slate-800 dark:text-slate-200 mb-2">${err.QuestionIndex + 1}. ${qObj.q}</p>
+                                        <div class="flex items-center gap-2 text-sm text-emerald-600 font-bold">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                                            <span>Correção: ${qObj.opts[qObj.correct]}</span>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                `;
+            } else {
+                errorsHTML = `
+                    <div class="mt-10 p-8 bg-emerald-50 dark:bg-emerald-900/20 rounded-[2.5rem] text-emerald-700 font-bold">
+                        🎉 Desempenho Perfeito! Você dominou todos os tópicos deste ciclo.
+                    </div>
+                `;
+            }
+
             intro.innerHTML = `
-                <div class="p-12 bg-blue-50 dark:bg-slate-800/50 rounded-[3rem] border-2 border-blue-100 dark:border-slate-800 text-center">
-                    <h3 class="text-4xl font-black mb-2 text-blue-900 dark:text-blue-400 italic">Ciclo Concluído</h3>
-                    <div class="text-8xl font-black text-blue-600 dark:text-blue-500 mb-8">${score}%</div>
-                    <button onclick="window.startQuiz()" class="bg-blue-700 text-white px-10 py-4 rounded-2xl font-black uppercase text-xs shadow-xl">Refazer Simulado</button>
-                    ${feedbackList}
+                <div class="p-12 bg-blue-50 dark:bg-slate-800/50 rounded-[4rem] border-2 border-blue-100 dark:border-slate-800 text-center">
+                    <h3 class="text-4xl font-black mb-2 text-blue-900 dark:text-blue-400 italic uppercase tracking-tighter">Ciclo Concluído</h3>
+                    <p class="text-slate-500 mb-8 font-medium">Confira seu desempenho técnico abaixo:</p>
+                    <div class="text-9xl font-black text-blue-600 dark:text-blue-500 mb-10 tracking-tighter">${score}%</div>
+                    <div class="flex flex-col sm:flex-row justify-center gap-4 mb-4">
+                        <button onclick="window.startQuiz()" class="bg-blue-700 text-white px-10 py-5 rounded-2xl font-black uppercase text-xs shadow-xl hover:bg-blue-800 transition-all">Refazer Simulado</button>
+                        <button onclick="window.showView('avaliacao-final')" class="bg-white text-blue-700 border-2 border-blue-200 px-10 py-5 rounded-2xl font-black uppercase text-xs hover:bg-blue-50 transition-all">Ir para Avaliação Final</button>
+                    </div>
+                    ${errorsHTML}
                 </div>`;
         }
     }
@@ -349,7 +612,11 @@ window.submitAnswer = (i) => {
 
 // --- LÓGICA DA AVALIAÇÃO FINAL ---
 window.startFinalExam = () => {
-    currentFIndex = 0; 
+    if(localStorage.getItem('study_final_test_done')) {
+        alert("Você já concluiu o exame de certificação.");
+        return;
+    }
+    currentFIndex = 0;
     finalExamResults = [];
     const intro = document.getElementById('final-intro');
     const ui = document.getElementById('final-ui');
@@ -363,66 +630,197 @@ window.renderFinalQuestion = () => {
     const fCount = document.getElementById('f-count');
     const fProgress = document.getElementById('f-progress');
     const content = document.getElementById('final-content');
+    const btnprev = document.getElementById('btn-final-prev');
+    const btnNext = document.getElementById('btn-final-next');
 
     if(fCount) fCount.innerText = `${currentFIndex + 1} / ${finalExamQuestions.length}`;
     if(fProgress) fProgress.style.width = `${((currentFIndex + 1) / finalExamQuestions.length) * 100}%`;
 
+    if(btnprev) {
+        if(currentFIndex > 0) btnprev.classList.remove('hidden');
+        else btnprev.classList.add('hidden');
+    }
+    
+    if(btnNext) {
+        if(currentFIndex === finalExamQuestions.length - 1) {
+            btnNext.textContent = "Finalizar";
+        } else {
+            btnNext.textContent = "Avançar";
+        }
+    }
+
+    const selectedAns = finalExamResults[currentFIndex] ? finalExamResults[currentFIndex].selected : null;
+
     if(content) {
         content.innerHTML = `
-            <h3 class="text-2xl font-black mb-10 leading-tight text-slate-900 dark:text-white">${q.q}</h3>
-            <div class="space-y-4">
-                ${q.opts.map((o, i) => `
-                    <button onclick="window.submitFinalAnswer(${i})" class="quiz-option w-full text-left p-6 rounded-3xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 hover:border-rose-400 hover:bg-rose-50 flex items-center group transition-all">
-                        <span class="w-10 h-10 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center mr-6 font-black group-hover:bg-rose-700 group-hover:text-white">${i+1}</span>
-                        <span class="font-bold text-slate-700 dark:text-slate-300 uppercase text-xs">${o}</span>
-                    </button>
-                `).join('')}
-            </div>`;
+            <div class="p-6 bg-slate-50 dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700">
+                <p class="font-bold text-slate-700 dark:text-slate-200 mb-4">${currentFIndex + 1}. ${q.q}</p>
+                <div class="flex flex-col gap-3 text-sm">
+                    ${q.opts.map((o, i) => `
+                        <label class="flex items-center gap-3 cursor-pointer p-4 bg-white dark:bg-slate-900 border rounded-xl hover:border-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/30 border-slate-200 dark:border-slate-700 transition-all font-bold has-[:checked]:border-rose-500 has-[:checked]:bg-rose-50 dark:has-[:checked]:bg-rose-900/50 has-[:checked]:text-rose-700 dark:has-[:checked]:text-rose-400">
+                            <input type="radio" name="finalTest_q${currentFIndex}" value="${i}" class="w-5 h-5 text-rose-600" ${selectedAns === i ? 'checked' : ''}>
+                            <span>${o}</span>
+                        </label>
+                    `).join('')}
+                    <label class="flex items-center gap-3 cursor-pointer p-4 bg-white dark:bg-slate-900 border rounded-xl hover:border-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-700 transition-all font-bold has-[:checked]:border-slate-500 has-[:checked]:bg-slate-100 dark:has-[:checked]:bg-slate-800 has-[:checked]:text-slate-700 dark:has-[:checked]:text-slate-400">
+                        <input type="radio" name="finalTest_q${currentFIndex}" value="-1" class="w-5 h-5 text-slate-600" ${selectedAns === -1 ? 'checked' : ''}>
+                        <span>Não sei responder (Pular)</span>
+                    </label>
+                </div>
+            </div>
+        `;
     }
 };
 
-window.submitFinalAnswer = (i) => {
+window.nextFinalQuestion = (dir) => {
+    const selected = document.querySelector(`input[name="finalTest_q${currentFIndex}"]:checked`);
     const q = finalExamQuestions[currentFIndex];
-    finalExamResults.push({ category: q.cat, correct: i === q.correct, questionIndex: currentFIndex });
     
-    if (currentFIndex < finalExamQuestions.length - 1) {
-        currentFIndex++; 
-        window.renderFinalQuestion();
+    const val = selected ? parseInt(selected.value) : -1;
+    finalExamResults[currentFIndex] = { category: q.cat, correct: val === q.correct, questionIndex: currentFIndex, selected: val };
+
+    if (dir > 0) {
+        if (currentFIndex < finalExamQuestions.length - 1) {
+            currentFIndex++;
+            window.renderFinalQuestion();
+        } else {
+            window.submitFinalExam();
+        }
     } else {
-        const score = Math.round((finalExamResults.filter(r => r.correct).length / finalExamQuestions.length) * 100);
-        const ui = document.getElementById('final-ui');
-        const intro = document.getElementById('final-intro');
-        if(ui) ui.classList.add('hidden');
-        if(intro) {
-            intro.classList.remove('hidden');
-            intro.innerHTML = `
-                <div class="p-12 bg-rose-50 dark:bg-rose-900/20 rounded-[3rem] border-2 border-rose-100 dark:border-slate-800 text-center">
-                    <h3 class="text-4xl font-black mb-2 text-rose-900 dark:text-blue-400 italic">Resultado Final</h3>
-                    <div class="text-8xl font-black text-rose-700 dark:text-rose-600 mb-4">${score}%</div>
-                    <button onclick="window.startFinalExam()" class="bg-rose-700 text-white px-10 py-4 rounded-2xl font-black uppercase text-xs shadow-xl">Tentar Novamente</button>
-                </div>`;
+        if (currentFIndex > 0) {
+            currentFIndex--;
+            window.renderFinalQuestion();
         }
     }
 };
 
-window.getFeedbackHTML = (results, questions) => {
-    const incorrects = results.filter(r => !r.correct);
-    if (incorrects.length === 0) return `<p class="text-emerald-600 font-bold mt-8">Desempenho Perfeito!</p>`;
+window.submitFinalExam = () => {
+    const correctCount = finalExamResults.filter(r => r && r.correct).length;
+    const score = Math.round((correctCount / finalExamQuestions.length) * 100);
     
-    return `
-        <div class="mt-12 text-left">
-            <h4 class="text-[10px] font-black uppercase text-rose-500 tracking-widest mb-6 text-center italic">Revisão Técnica</h4>
-            <div class="space-y-4">
-                ${incorrects.map(r => {
-                    const q = questions[r.questionIndex];
-                    return `
-                        <div class="p-6 bg-white dark:bg-slate-900 border border-rose-100 rounded-3xl">
-                            <p class="text-sm font-black mb-2 text-slate-800 dark:text-slate-200">${q.q}</p>
-                            <p class="text-xs text-emerald-600 font-bold italic">Correção: ${q.opts[q.correct]}</p>
-                        </div>`;
-                }).join('')}
+    localStorage.setItem('study_final_test_done', 'true');
+    window.saveEvaluationResult('avaliacao', score, correctCount, finalExamQuestions.length);
+
+    const ui = document.getElementById('final-ui');
+    if(ui) ui.classList.add('hidden');
+    
+    // Avança para a autoeficácia pós-teste como view integrada
+    window.showView('efficacy');
+};
+
+// --- LÓGICA DO PRÉ-TESTE (Baseline) ---
+window.renderPreQuestion = () => {
+    const q = finalExamQuestions[currentPreIndex];
+    const preCount = document.getElementById('pre-count');
+    const preProgress = document.getElementById('pre-progress');
+    const content = document.getElementById('pre-test-content');
+    const btnPrev = document.getElementById('btn-pre-prev');
+    const btnNext = document.getElementById('btn-pre-next');
+
+    if(preCount) preCount.innerText = `${currentPreIndex + 1} / ${finalExamQuestions.length}`;
+    if(preProgress) preProgress.style.width = `${((currentPreIndex + 1) / finalExamQuestions.length) * 100}%`;
+
+    if(btnPrev) {
+        if(currentPreIndex > 0) btnPrev.classList.remove('hidden');
+        else btnPrev.classList.add('hidden');
+    }
+    
+    if(btnNext) {
+        btnNext.textContent = (currentPreIndex === finalExamQuestions.length - 1) ? "Finalizar Baseline" : "Avançar";
+    }
+
+    const selectedAns = preTestResults[currentPreIndex] ? preTestResults[currentPreIndex].selected : null;
+
+    if(content) {
+        content.innerHTML = `
+            <div class="p-6 bg-slate-50 dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700">
+                <p class="font-bold text-slate-700 dark:text-slate-200 mb-4">${currentPreIndex + 1}. ${q.q}</p>
+                <div class="flex flex-col gap-3 text-sm">
+                    ${q.opts.map((o, i) => `
+                        <label class="flex items-center gap-3 cursor-pointer p-4 bg-white dark:bg-slate-900 border rounded-xl hover:border-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/30 border-slate-200 dark:border-slate-700 transition-all font-bold has-[:checked]:border-rose-500 has-[:checked]:bg-rose-50 dark:has-[:checked]:bg-rose-900/50 has-[:checked]:text-rose-700 dark:has-[:checked]:text-rose-400">
+                            <input type="radio" name="preTest_q${currentPreIndex}" value="${i}" class="w-5 h-5 text-rose-600" ${selectedAns === i ? 'checked' : ''}>
+                            <span>${o}</span>
+                        </label>
+                    `).join('')}
+                    <label class="flex items-center gap-3 cursor-pointer p-4 bg-white dark:bg-slate-900 border rounded-xl hover:border-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-700 transition-all font-bold has-[:checked]:border-slate-500 has-[:checked]:bg-slate-100 dark:has-[:checked]:bg-slate-800 has-[:checked]:text-slate-700 dark:has-[:checked]:text-slate-400">
+                        <input type="radio" name="preTest_q${currentPreIndex}" value="-1" class="w-5 h-5 text-slate-600" ${selectedAns === -1 ? 'checked' : ''}>
+                        <span>Não sei responder (Pular)</span>
+                    </label>
+                </div>
             </div>
-        </div>`;
+        `;
+    }
+};
+
+window.nextPreQuestion = (dir) => {
+    const selected = document.querySelector(`input[name="preTest_q${currentPreIndex}"]:checked`);
+    const q = finalExamQuestions[currentPreIndex];
+    
+    const val = selected ? parseInt(selected.value) : -1;
+    preTestResults[currentPreIndex] = { correct: val === q.correct, selected: val };
+
+    if (dir > 0) {
+        if (currentPreIndex < finalExamQuestions.length - 1) {
+            currentPreIndex++;
+            window.renderPreQuestion();
+        } else {
+            window.submitPreTest();
+        }
+    } else {
+        if (currentPreIndex > 0) {
+            currentPreIndex--;
+            window.renderPreQuestion();
+        }
+    }
+};
+
+window.submitPreTest = async () => {
+    const correctCount = preTestResults.filter(r => r && r.correct).length;
+    const score = Math.round((correctCount / finalExamQuestions.length) * 100);
+    
+    localStorage.setItem('study_baseline_done', 'true');
+    localStorage.setItem('study_pre_test_score', score.toString());
+    
+    // Envio para o Supabase
+    const session = await window.getSession();
+    const userId = session?.user?.id || 'anon';
+    
+    if (window.db) {
+        const preTestData = {
+            user_id: userId,
+            score: correctCount,
+            total: finalExamQuestions.length,
+            percent: score,
+            passed: score >= 80,
+            type: 'pre_teste'
+        };
+        await window.db.insert('quiz_attempts', preTestData);
+    }
+
+    const content = document.getElementById('pre-test-content');
+    if(content) {
+        content.innerHTML = `
+            <div class="p-12 bg-rose-50 dark:bg-rose-900/20 rounded-[3rem] border-2 border-rose-100 dark:border-slate-800 text-center">
+                <h3 class="text-4xl font-black mb-2 text-rose-900 dark:text-rose-400 italic">Resultado da Baseline</h3>
+                <p class="text-slate-500 mb-6">Seu nível de conhecimento inicial foi computado.</p>
+                <div class="text-8xl font-black text-rose-700 dark:text-rose-600 mb-4">${score}%</div>
+                <button onclick="window.finishPreTestUI()" class="w-full bg-rose-600 hover:bg-rose-700 text-white px-8 py-4 rounded-xl font-black uppercase tracking-wide mt-4 transition-all shadow-xl">Prosseguir para o Treinamento</button>
+            </div>
+        `;
+    }
+    
+    // Ocultar navegação original do teste
+    const container = document.getElementById('pre-test-container');
+    if(container) {
+        const nav = container.querySelector('.flex.gap-4.mt-8');
+        if(nav) nav.classList.add('hidden');
+    }
+};
+
+window.finishPreTestUI = () => {
+    localStorage.setItem('study_baseline_done', 'true'); 
+    if(window.checkStudyPhase) window.checkStudyPhase();
+    if(window.showView) window.showView('introducao');
 };
 
 // Abre a janela de login
@@ -430,7 +828,7 @@ window.openAuthModal = () => {
     const modal = document.getElementById('auth-modal');
     if (modal) {
         modal.classList.remove('hidden');
-        modal.classList.add('flex'); // Garante a centralização
+        modal.classList.add('flex');
     }
 };
 
@@ -458,11 +856,1603 @@ window.toggleAuthView = (view) => {
     }
 };
 
+window.saveEvaluationResult = async (type, percent, correct, total) => {
+    const session = await window.getSession();
+    const userId = session?.user?.id || 'anon';
+    
+    // Fallback Local
+    const localAttempt = {
+        id: Date.now(),
+        date: new Date().toISOString(),
+        type: type,
+        score: correct,
+        total: total,
+        percent: percent,
+        passed: percent >= 80,
+        source: 'local'
+    };
+    let localHistory = JSON.parse(localStorage.getItem('bls_quiz_attempts')) || [];
+    localHistory.push(localAttempt);
+    localStorage.setItem('bls_quiz_attempts', JSON.stringify(localHistory));
+
+    // Nuvem (Supabase)
+    if(window.db) {
+        const cloudAttempt = {
+            user_id: userId,
+            score: correct,
+            total: total,
+            percent: percent,
+            passed: percent >= 80,
+            type: type,
+            date: new Date().toISOString()
+        };
+        await window.db.insert('quiz_attempts', cloudAttempt);
+    }
+};
 
 
 
+window.submitProfile = async (e) => {
+    e.preventDefault();
+    const session = await window.getSession();
+    const userId = session.user.id;
+
+    const idade = document.getElementById('input-idade').value;
+    const genero = document.querySelector('input[name="input-genero"]:checked')?.value;
+    const setor = document.querySelector('input[name="input-setor"]:checked')?.value;
+    const vinculo = document.querySelector('input[name="input-vinculo"]:checked')?.value;
+    const exp = document.querySelector('input[name="input-exp"]:checked')?.value;
+
+    const profileData = {
+        user_id: userId,
+        idade: parseInt(idade),
+        genero,
+        setor,
+        vinculo,
+        experiencia_previa: exp
+    };
+
+    // Salva local e nuvem
+    localStorage.setItem('study_profile_type', setor);
+    localStorage.setItem('study_profile_done', 'true');
+    localStorage.setItem('study_profile_data', JSON.stringify(profileData));
+
+    if (window.db) {
+        await window.db.insert('participantes', profileData);
+    }
+
+    window.checkStudyPhase();
+};
+
+window.submitPreEfficacy = async () => {
+    const session = await window.getSession();
+    const userId = session.user.id;
+    
+    const responses = [];
+    for(let i=1; i<=4; i++) {
+        const val = document.querySelector(`input[name="preeff${i}"]:checked`)?.value;
+        if(val) {
+            responses.push({ user_id: userId, fase: 'pre', pergunta_id: i, valor: parseInt(val) });
+        }
+    }
+
+    if (responses.length > 0 && window.db) {
+        await window.db.insert('autoeficacia_usabilidade', responses);
+    }
+
+    localStorage.setItem('study_pre_efficacy_done', 'true');
+    window.checkStudyPhase();
+};
+
+window.submitEfficacy = async () => {
+    const session = await window.getSession();
+    const userId = session.user.id;
+    
+    const responses = [];
+    for(let i=1; i<=4; i++) {
+        const val = document.querySelector(`input[name="eff${i}"]:checked`)?.value;
+        if(val) {
+            responses.push({ user_id: userId, fase: 'pos', pergunta_id: i, valor: parseInt(val) });
+        }
+    }
+
+    // Executa o insert em segundo plano para não travar a UI
+    if (responses.length > 0 && window.db) {
+        window.db.insert('autoeficacia_usabilidade', responses).catch(err => console.error("Erro background save:", err));
+    }
+
+    localStorage.setItem('study_post_efficacy_done', 'true');
+    
+    // Mudança de UI INSTANTÂNEA
+    window.showView('ux');
+    
+    console.log("[Autoeficácia] Fluxo avançado para UX.");
+};
+
+window.submitUX = async () => {
+    const session = await window.getSession();
+    const userId = session.user.id;
+    const suggestions = document.getElementById('ux-suggestions')?.value || "";
+    
+    const uxData = {
+        user_id: userId,
+        ux1: parseInt(document.querySelector('input[name="ux1"]:checked')?.value || 0),
+        ux2: parseInt(document.querySelector('input[name="ux2"]:checked')?.value || 0),
+        ux3: parseInt(document.querySelector('input[name="ux3"]:checked')?.value || 0),
+        ux4: parseInt(document.querySelector('input[name="ux4"]:checked')?.value || 0),
+        ux5: parseInt(document.querySelector('input[name="ux5"]:checked')?.value || 0),
+        suggestions: suggestions
+    };
+
+    if (window.db) {
+        await window.db.insert('ux_evaluation', uxData);
+    }
+
+    localStorage.setItem('study_ux_done', 'true');
+    localStorage.setItem('study_ux_suggestions', suggestions);
+
+    let score = 0;
+    if(typeof finalExamQuestions !== "undefined" && finalExamQuestions.length > 0) {
+        const correctCount = finalExamResults.filter(r => r && r.correct).length;
+        score = Math.round((correctCount / finalExamQuestions.length) * 100);
+    }
+    
+    window.showView('avaliacao-final');
+    window.showFinalResults(score);
+};
+
+window.showFinalResults = (score) => {
+    const intro = document.getElementById('final-intro');
+    if(intro) {
+        intro.classList.remove('hidden');
+        
+        // Obter a nota do Pré-Teste
+        const preScoreStr = localStorage.getItem('study_pre_test_score');
+        const preScore = preScoreStr ? parseInt(preScoreStr) : 0;
+        
+        // Calcular o ganho de aprendizado
+        const gain = score - preScore;
+        const gainSign = gain >= 0 ? '+' : '';
+        const gainClass = gain > 0 
+            ? 'bg-emerald-600 dark:bg-emerald-700 text-white' 
+            : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300';
+            
+        let feedbackMessage = '';
+        if (gain > 0) {
+            feedbackMessage = `Você obteve um ganho de <strong>${gain}%</strong> de conhecimento teórico imediato após interagir com a nossa plataforma digital!`;
+        } else if (score >= 80) {
+            feedbackMessage = `Você manteve um excelente nível de conhecimento teórico de <strong>${score}%</strong>!`;
+        } else {
+            feedbackMessage = `Você concluiu todas as etapas da pesquisa! Seu nível final foi de ${score}%.`;
+        }
+
+        let content = `
+            <div class="p-8 md:p-12 bg-white dark:bg-slate-900 rounded-[3.5rem] border border-slate-200 dark:border-slate-800 shadow-2xl text-center space-y-8 animate-in zoom-in duration-300">
+                <div class="space-y-2">
+                    <h3 class="text-3xl md:text-4xl font-black text-blue-900 dark:text-blue-400 uppercase italic">Painel de Evolução</h3>
+                    <p class="text-sm text-slate-500 dark:text-slate-400">Muito obrigado! Sua participação é fundamental para validar a usabilidade e eficácia pedagógica da plataforma.</p>
+                </div>
+
+                <!-- Painel Comparativo de Notas -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <!-- PRÉ-TESTE -->
+                    <div class="p-6 bg-slate-50 dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-750 flex flex-col justify-center">
+                        <span class="text-[9px] font-black uppercase text-slate-400 tracking-wider mb-2">Desempenho Inicial (Pré-Teste)</span>
+                        <div class="text-4xl font-black text-slate-700 dark:text-slate-300">${preScore}%</div>
+                    </div>
+                    
+                    <!-- PÓS-TESTE -->
+                    <div class="p-6 bg-blue-50 dark:bg-blue-950/20 rounded-3xl border border-blue-100 dark:border-blue-900/30 flex flex-col justify-center">
+                        <span class="text-[9px] font-black uppercase text-blue-500 tracking-wider mb-2">Desempenho Final (Pós-Teste)</span>
+                        <div class="text-4xl font-black text-blue-700 dark:text-blue-400">${score}%</div>
+                    </div>
+
+                    <!-- EVOLUÇÃO -->
+                    <div class="p-6 ${gainClass} rounded-3xl flex flex-col justify-center shadow-lg">
+                        <span class="text-[9px] font-black uppercase tracking-wider mb-2 opacity-80">Evolução Individual (Ganho)</span>
+                        <div class="text-4xl font-black">${gainSign}${gain}%</div>
+                    </div>
+                </div>
+
+                <!-- Caixa explicativa sobre os objetivos da pesquisa -->
+                <div class="p-6 bg-slate-50 dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 text-left text-sm leading-relaxed text-slate-600 dark:text-slate-300 space-y-4">
+                    <p class="font-bold text-slate-800 dark:text-white uppercase text-xs tracking-wider">Análise Científica de Impacto:</p>
+                    <p>${feedbackMessage} O objetivo principal deste estudo é avaliar o ganho individual de aprendizado comparando a autoeficácia e o acerto teórico antes e depois do uso da plataforma autoinstrucional.</p>
+                    <div class="flex items-center gap-3 text-xs text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/20 p-4 rounded-2xl">
+                        <span class="text-lg">✓</span>
+                        <span>Seus dados foram pareados e armazenados com sucesso de forma totalmente anônima.</span>
+                    </div>
+                </div>
+
+                <!-- Botões de Ação -->
+                <div class="flex flex-col sm:flex-row justify-center gap-4 pt-4">
+                    <button onclick="window.showView('hero')" class="bg-blue-700 hover:bg-blue-800 text-white px-8 py-4 rounded-2xl font-black uppercase text-xs shadow-xl hover:scale-[1.02] active:scale-95 transition-all">Ir para a Tela Inicial</button>
+                </div>
+            </div>
+        `;
+
+        intro.innerHTML = content;
+    }
+};
+
+window.checkStudyPhase = () => {
+    const hasTCLE = localStorage.getItem('study_tcle_accepted') === 'true';
+    const hasProfile = localStorage.getItem('study_profile_done') === 'true';
+    const hasBaseline = localStorage.getItem('study_baseline_done') === 'true';
+    
+    if (!hasTCLE || !hasProfile || !hasBaseline) {
+        if (!hasTCLE) {
+            window.showView('tcle');
+        } else if (!hasProfile) {
+            window.showView('profile');
+        } else if (!hasBaseline) {
+            const hasPreEfficacy = localStorage.getItem('study_pre_efficacy_done') === 'true';
+            if (!hasPreEfficacy) {
+                window.showView('pre-efficacy');
+            } else {
+                window.showView('pre-test');
+            }
+        }
+    } else {
+        // Exibe a tela principal do sistema ou recupera o progresso salvo
+        if(window.showView) {
+            const savedView = localStorage.getItem('current_study_view');
+            const focusViews = ['tcle', 'profile', 'pre-efficacy', 'pre-test', 'efficacy', 'ux'];
+            if (savedView && savedView !== 'developer' && !focusViews.includes(savedView)) {
+                window.showView(savedView);
+            } else {
+                window.showView('introducao'); // Leva direto à introdução do treinamento se acabou a baseline
+            }
+        }
+    }
+};
+
+window.checkTCLEScroll = () => {
+    const el = document.getElementById('tcle-content');
+    const btn = document.getElementById('btn-accept-tcle');
+    if (!el || !btn) return;
+    
+    // Verificação robusta de scroll total (tolerância de 10px para mobile)
+    const scrollTotal = el.scrollHeight;
+    const currentScroll = el.scrollTop + el.clientHeight;
+    const isBottom = scrollTotal - currentScroll <= 10;
+    
+    if (isBottom && btn.disabled) {
+        btn.disabled = false;
+        btn.classList.remove('opacity-50', 'cursor-not-allowed');
+        btn.classList.add('hover:scale-105', 'active:scale-95', 'bg-blue-600');
+        btn.innerHTML = "Li e Aceito Participar";
+        console.log("[TCLE] Scroll finalizado. Botão habilitado.");
+    }
+};
+
+window.downloadTCLE = () => {
+    try {
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF();
+        
+        let yPos = 25;
+        const marginX = 20;
+        const pageHeight = pdf.internal.pageSize.height;
+        const pageWidth = pdf.internal.pageSize.width;
+        const printableWidth = pageWidth - (2 * marginX); // 170
+
+        // Helper to check page bounds and auto-add page
+        const checkPageBreak = (neededHeight) => {
+            if (yPos + neededHeight > pageHeight - 25) {
+                // Add page number footer before adding new page
+                pdf.setFontSize(8);
+                pdf.setFont("helvetica", "normal");
+                pdf.text(`Página ${pdf.internal.getNumberOfPages()}`, pageWidth / 2, pageHeight - 15, { align: 'center' });
+
+                pdf.addPage();
+                yPos = 25;
+                return true;
+            }
+            return false;
+        };
+
+        const sections = [
+            { type: 'header', text: 'UNIVERSIDADE FEDERAL DE SERGIPE' },
+            { type: 'header', text: 'DEPARTAMENTO DE MEDICINA DE LAGARTO' },
+            { type: 'header_sub', text: 'COMITÊ DE ÉTICA EM PESQUISA ENVOLVENDO SERES HUMANOS' },
+            { type: 'line' },
+            { type: 'title', text: 'TERMO DE CONSENTIMENTO LIVRE E ESCLARECIDO PARA PESQUISAS EM AMBIENTE VIRTUAL' },
+            { type: 'subtitle', text: 'Modelo adaptado do CEP Unifesp e baseado na Resolução CNS 510/2016 e no Ofício Circular 2/2021/CONEP/SECNS/MS' },
+            
+            { type: 'paragraph', text: 'Você está sendo convidado(a) a participar da pesquisa "Avaliação de Impacto e Usabilidade de uma Ferramenta Digital para o Ensino de Suporte Básico de Vida no Hospital Universitário de Lagarto". O objetivo desta pesquisa é avaliar o impacto de uma plataforma digital autoinstrucional no conhecimento teórico e na percepção de autoeficácia sobre Suporte Básico de Vida (SBV) na comunidade hospitalar.' },
+            
+            { type: 'heading', text: 'Pesquisadores Responsáveis' },
+            { type: 'paragraph', text: 'A pesquisadora responsável é a Profa. Dra. Evelyn de Oliveira Machado (Orientadora), docente do Departamento de Medicina da UFS-Lagarto, tendo como coorientador o Prof. Dr. Thiago da Silva Mendes, docente do Departamento de Medicina da UFS-Lagarto, além do pesquisador assistente, o discente Gabriel Carvalho Moreira.' },
+            
+            { type: 'heading', text: 'Procedimentos da Pesquisa' },
+            { type: 'paragraph', text: 'Caso aceite participar, você acessará uma plataforma digital educativa (WebApp) via smartphone, tablet ou computador. O conteúdo e a interface da plataforma foram validados por um comitê de especialistas através do Índice de Validade de Conteúdo (IVC), método científico que assegura a precisão técnica das instruções de Suporte Básico de Vida e a adequação pedagógica do sistema, garantindo que o recurso esteja alinhado aos padrões internacionais antes da sua disponibilização. O fluxo da pesquisa seguirá as seguintes etapas:' },
+            { type: 'bullet', text: '• Consentimento: Leitura e aceite obrigatórios deste Termo de Consentimento para início da navegação na plataforma;' },
+            { type: 'bullet', text: '• Perfil Sociodemográfico: Preenchimento obrigatório de dados de caracterização (idade, gênero, escolaridade, setor de atuação e experiência prévia em SBV), necessários para validação do vínculo institucional e caracterização da amostra;' },
+            { type: 'bullet', text: '• Etapa Inicial: Avaliação de conhecimento prévio através de questionário técnico (Pré-teste) seguida do primeiro questionário de Autoeficácia;' },
+            { type: 'bullet', text: '• Intervenção Educativa: Acesso ao conteúdo autoinstrucional sobre Suporte Básico de Vida, baseado nas diretrizes da American Heart Association (AHA);' },
+            { type: 'bullet', text: '• Etapa Final: Avaliação de conhecimento pós-intervenção (Pós-teste), seguida do segundo questionário de Autoeficácia e escala de usabilidade da plataforma.' },
+            
+            { type: 'paragraph', text: 'O tempo total estimado para a realização de todas as etapas é de aproximadamente 20 a 30 minutos, podendo variar conforme o ritmo individual de cada participante. A coleta de dados ocorrerá no período de novembro de 2026 a março de 2027, tendo como público-alvo toda a comunidade hospitalar do Hospital Universitário de Lagarto (profissionais de saúde, colaboradores de setores não assistenciais, estudantes e residentes), exceto aqueles que se encontrarem em período de licença médica ou férias durante a execução da pesquisa.' },
+            
+            { type: 'paragraph', text: 'Esclarecemos que, embora o aceite deste termo e o preenchimento do perfil sociodemográfico sejam requisitos para o prosseguimento nas etapas da plataforma, as perguntas técnicas contidas no Pré-teste, Pós-teste e em ambas as escalas de Autoeficácia não são de preenchimento obrigatório. O participante poderá deixar itens em branco ou saltar questões sem que isso impeça o prosseguimento na ferramenta ou acarrete qualquer penalidade.' },
+            
+            { type: 'heading', text: 'Riscos' },
+            { type: 'paragraph', text: 'Toda pesquisa envolvendo seres humanos pode oferecer riscos aos participantes. Nesta pesquisa, os riscos são classificados como mínimos. Durante a participação, pode haver eventual desconforto relacionado à autoavaliação dos conhecimentos sobre o tema a partir das respostas fornecidas nos questionários. Esse risco é reduzido pela natureza anônima da coleta de dados, pela não solicitação de informações identificáveis nas etapas iniciais e pelo compromisso da equipe com a confidencialidade das informações, assegurando a proteção da imagem, da dignidade e a não estigmatização dos participantes.' },
+            { type: 'paragraph', text: 'Considerando que a coleta será realizada em ambiente virtual, há riscos adicionais característicos desse meio, conforme orientações da Carta Circular nº 1/2021-CONEP:' },
+            { type: 'bullet', text: '1. Possibilidade de vazamento ou perda de dados em decorrência de falhas técnicas das plataformas digitais utilizadas;' },
+            { type: 'bullet', text: '2. Acesso não autorizado ou interceptação indevida por terceiros, mesmo com o uso de ferramentas digitais seguras;' },
+            { type: 'bullet', text: '3. Falhas de conexão ou instabilidades técnicas que possam afetar o envio ou a integridade das respostas;' },
+            { type: 'bullet', text: '4. Rastreamento inadvertido de comportamento online por terceiros durante o acesso à plataforma.' },
+            { type: 'paragraph', text: 'Para mitigar esses riscos, os dados serão armazenados em ambiente virtual seguro (Supabase/PostgreSQL) com acesso restrito à equipe de pesquisa e protegido por mecanismos de autenticação e criptografia. A plataforma foi selecionada com base em critérios de segurança, confiabilidade e conformidade com a Lei Geral de Proteção de Dados Pessoais (LGPD - Lei nº 13.709/2018). Recomenda-se que você responda aos questionários em local reservado, utilizando sempre que possível um dispositivo de uso pessoal (computador, tablet ou celular), garantindo maior privacidade e proteção das informações fornecidas. A plataforma não compartilha dados com terceiros e não utiliza cookies de rastreamento para fins comerciais.' },
+            
+            { type: 'heading', text: 'Benefícios' },
+            { type: 'paragraph', text: 'O benefício direto é o acesso gratuito a uma ferramenta de atualização em Suporte Básico de Vida, contribuindo para o aprimoramento do seu conhecimento técnico e para o fortalecimento da cultura de segurança do paciente na instituição. Além disso, sua participação contribuirá para o reconhecimento das necessidades de capacitação da comunidade hospitalar do HUL, auxiliando em futuras ações de educação permanente.' },
+            
+            { type: 'heading', text: 'Confidencialidade, Privacidade e Proteção de Dados' },
+            { type: 'paragraph', text: 'Este estudo segue rigorosamente as diretrizes da Resolução CNS nº 466/2012, Resolução CNS nº 510/2016 e a Lei Geral de Proteção de Dados Pessoais (LGPD - Lei nº 13.709/2018). Seu nome não será divulgado em nenhuma publicação científica derivada deste estudo. Os dados técnicos serão identificados por códigos alfanuméricos e armazenados em banco de dados seguro, com acesso restrito aos pesquisadores responsáveis. Ressalta-se que dados de identificação pessoal (como nome completo e CPF) não serão solicitados em nenhuma etapa da pesquisa. Todos os dados coletados serão tratados de forma anonimizada, sendo identificados apenas por códigos alfanuméricos gerados automaticamente pelo sistema, garantindo que a análise do conhecimento e da usabilidade permaneça totalmente desvinculada de qualquer informação que possa identificar os participantes.' },
+            { type: 'paragraph', text: 'Os dados coletados nesta pesquisa serão utilizados para análise de impacto da ferramenta, produção de relatórios institucionais e poderão compor o Trabalho de Conclusão de Curso (TCC) do pesquisador assistente Gabriel Carvalho Moreira, bem como artigos científicos e apresentações em congressos, mantendo-se sempre o anonimato dos participantes. Os dados serão armazenados pelo período de 5 anos, conforme determina a legislação vigente, e após esse prazo serão permanentemente excluídos.' },
+            
+            { type: 'heading', text: 'Voluntariedade e Direito de Retirada' },
+            { type: 'paragraph', text: 'Sua participação é totalmente voluntária. Você é livre para não responder a qualquer pergunta ou abandonar a pesquisa a qualquer momento, sem qualquer penalidade ou prejuízo em seu vínculo com a instituição. Você pode solicitar a exclusão de seus dados a qualquer momento enviando um e-mail para gabriel0803@academico.ufs.br, identificando-se pelo código de usuário fornecido pela plataforma.' },
+            
+            { type: 'heading', text: 'Custos e Indenização' },
+            { type: 'paragraph', text: 'Não haverá pagamento pela participação nesta pesquisa. Caso haja qualquer gasto comprovado decorrente diretamente da pesquisa, este será ressarcido pelos pesquisadores responsáveis. Se houver dano pessoal comprovado decorrente da pesquisa, o participante tem direito a buscar indenização conforme a legislação vigente (Resolução CNS nº 510/2016).' },
+            
+            { type: 'heading', text: 'Contatos' },
+            { type: 'paragraph', text: '• Pesquisadora Responsável: Profa. Dra. Evelyn de Oliveira Machado | Tel: (79) 98837-3987 | E-mail: evelyn.machado@gmail.com\n• Coorientador: Prof. Dr. Thiago da Silva Mendes\n• Pesquisador Assistente: Gabriel Carvalho Moreira | Tel: (79) 99808-0371 | E-mail: gabriel0803@academico.ufs.br\n• Comitê de Ética em Pesquisa (CEP-HUL/UFS): Av. Gov. Marcelo Déda, 13, Centro, Lagarto/SE, CEP 49400-000 | Tel: (79) 3632-2189 | E-mail: cephulag@ufs.br | Horário de atendimento: segunda a sexta-feira, das 08h às 12h.' },
+            
+            { type: 'heading', text: 'Declaração de Consentimento' },
+            { type: 'paragraph', text: 'Ao assinalar "Concordo" abaixo, você declara que:\n● Leu e compreendeu todas as informações contidas neste Termo de Consentimento Livre e Esclarecido;\n● Teve a oportunidade de esclarecer suas dúvidas através dos contatos fornecidos;\n● Compreendeu os objetivos, procedimentos, riscos e benefícios da pesquisa;\n● Aceita participar voluntariamente desta pesquisa.\nRecomendamos que você salve ou imprima uma cópia deste documento para seus registros.' },
+            
+            { type: 'spacer' },
+            { type: 'signature' }
+        ];
+
+        sections.forEach(sec => {
+            if (sec.type === 'header') {
+                pdf.setFont("helvetica", "bold");
+                pdf.setFontSize(10);
+                checkPageBreak(8);
+                pdf.text(sec.text, pageWidth / 2, yPos, { align: 'center' });
+                yPos += 5.5;
+            } else if (sec.type === 'header_sub') {
+                pdf.setFont("helvetica", "normal");
+                pdf.setFontSize(7.5);
+                checkPageBreak(6);
+                pdf.text(sec.text, pageWidth / 2, yPos, { align: 'center' });
+                yPos += 4.5;
+            } else if (sec.type === 'line') {
+                checkPageBreak(4);
+                pdf.setLineWidth(0.3);
+                pdf.setDrawColor(200, 200, 200);
+                pdf.line(marginX, yPos, pageWidth - marginX, yPos);
+                yPos += 5.5;
+            } else if (sec.type === 'title') {
+                pdf.setFont("helvetica", "bold");
+                pdf.setFontSize(9.5);
+                const lines = pdf.splitTextToSize(sec.text, printableWidth);
+                checkPageBreak(lines.length * 5.5);
+                lines.forEach(line => {
+                    pdf.text(line, pageWidth / 2, yPos, { align: 'center' });
+                    yPos += 5;
+                });
+                yPos += 1.5;
+            } else if (sec.type === 'subtitle') {
+                pdf.setFont("helvetica", "italic");
+                pdf.setFontSize(7.5);
+                const lines = pdf.splitTextToSize(sec.text, printableWidth);
+                checkPageBreak(lines.length * 4.5);
+                lines.forEach(line => {
+                    pdf.text(line, pageWidth / 2, yPos, { align: 'center' });
+                    yPos += 4;
+                });
+                yPos += 3;
+            } else if (sec.type === 'heading') {
+                pdf.setFont("helvetica", "bold");
+                pdf.setFontSize(9);
+                checkPageBreak(10);
+                yPos += 1.5;
+                pdf.text(sec.text, marginX, yPos);
+                yPos += 5;
+            } else if (sec.type === 'paragraph' || sec.type === 'bullet') {
+                pdf.setFont("helvetica", "normal");
+                pdf.setFontSize(8.2);
+                
+                // Handle newlines if present
+                const rawParagraphs = sec.text.split('\n');
+                rawParagraphs.forEach(rawP => {
+                    const lines = pdf.splitTextToSize(rawP, sec.type === 'bullet' ? printableWidth - 5 : printableWidth);
+                    lines.forEach(line => {
+                        checkPageBreak(4.5);
+                        const x = sec.type === 'bullet' ? marginX + 4 : marginX;
+                        pdf.text(line, x, yPos);
+                        yPos += 4.2;
+                    });
+                    yPos += 1;
+                });
+                yPos += 1.5; // space after paragraph
+            } else if (sec.type === 'spacer') {
+                yPos += 4;
+            } else if (sec.type === 'signature') {
+                pdf.setFont("helvetica", "bold");
+                pdf.setFontSize(8);
+                const dateStr = new Date().toLocaleString('pt-BR');
+                const participantCode = localStorage.getItem('study_user_code') || 'N/A';
+                
+                const sigText = [
+                    '-------------------------------------------------------------------------------------------------',
+                    'REGISTRO DE ACEITE DIGITAL DO PARTICIPANTE',
+                    `Código do Participante: ${participantCode}`,
+                    `Data/Hora do Aceite: ${dateStr}`,
+                    'Assinado eletronicamente via LifeSupport Pro Platform.'
+                ];
+                
+                checkPageBreak(25);
+                sigText.forEach(line => {
+                    pdf.text(line, marginX, yPos);
+                    yPos += 4;
+                });
+            }
+        });
+
+        // Add last page number footer
+        pdf.setFontSize(7.5);
+        pdf.setFont("helvetica", "normal");
+        pdf.text(`Página ${pdf.internal.getNumberOfPages()}`, pageWidth / 2, pageHeight - 12, { align: 'center' });
+        
+        pdf.save('TCLE_Assinado_CEP.pdf');
+        
+    } catch(err) {
+        console.error("Erro ao gerar PDF do TCLE:", err);
+        alert("Ocorreu um erro ao gerar o PDF. Verifique se o navegador suporta esta ação.");
+    }
+};
+
+window.acceptTCLE = () => {
+    localStorage.setItem('study_tcle_accepted', 'true');
+    window.checkStudyPhase();
+};
 
 
+// --- LÓGICA DO PAINEL DO DESENVOLVEDOR ---
 
+let devClickCount = 0;
+window.triggerDevPanel = () => {
+    devClickCount++;
+    if (devClickCount >= 5) {
+        devClickCount = 0;
+        const password = prompt("Digite a senha de desenvolvedor para acessar o painel:");
+        if (password === "tccdev2026") {
+            window.showView('developer');
+        } else if (password !== null) {
+            alert("Senha incorreta!");
+        }
+    }
+};
 
+// Intercepta e altera a função showView para carregar os dados se for a view developer,
+// além de aplicar regras de restrição de fluxo do participante, salvar progresso e atualizar a barra.
+const originalShowView = window.showView;
+window.showView = (v) => {
+    // 1. Marcar como Dev se acessou o painel do desenvolvedor
+    if (v === 'developer') {
+        localStorage.setItem('is_dev_user', 'true');
+        window.loadDeveloperData();
+    }
 
+    // 2. Travar o progresso caso o participante tente pular o treinamento
+    if (v === 'avaliacao-final' || v === 'pratica') {
+        const isTrainingDone = localStorage.getItem('study_training_done') === 'true';
+        const isDev = localStorage.getItem('is_dev_user') === 'true' || new URLSearchParams(window.location.search).has('dev');
+        if (!isTrainingDone && !isDev) {
+            alert("Atenção: Para realizar a Avaliação Final ou o Simulador de Casos, você deve primeiro concluir a leitura de todos os módulos de treinamento!");
+            v = 'introducao';
+        }
+    }
+
+    // Se for a avaliação final e já tiver sido realizada, mostramos diretamente a tela de resultados
+    if (v === 'avaliacao-final' && localStorage.getItem('study_final_test_done') === 'true') {
+        setTimeout(() => {
+            const localHistory = JSON.parse(localStorage.getItem('bls_quiz_attempts')) || [];
+            const finalAttempt = localHistory.slice().reverse().find(a => a.type === 'avaliacao');
+            const score = finalAttempt ? finalAttempt.percent : 0;
+            
+            const finalUi = document.getElementById('final-ui');
+            if (finalUi) finalUi.classList.add('hidden');
+            
+            window.showFinalResults(score);
+        }, 50);
+    }
+
+    // 3. Salvar progresso de tela ativa no localStorage (exceto developer)
+    if (v !== 'developer') {
+        localStorage.setItem('current_study_view', v);
+    }
+
+    // 4. Executar comportamento original de troca de telas
+    if (originalShowView) {
+        originalShowView(v);
+    } else {
+        document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
+        const target = document.getElementById(`view-${v}`);
+        if(target) target.classList.add('active');
+        window.scrollTo(0,0);
+    }
+
+    // Se for pré-teste, inicializa a renderização
+    if (v === 'pre-test') {
+        window.renderPreQuestion();
+    }
+
+    // 5. Fechar barra lateral se estiver aberta (Melhoria de UX)
+    const sidebar = document.getElementById('sidebar');
+    const sidebarOverlay = document.getElementById('sidebar-overlay');
+    if (sidebar && !sidebar.classList.contains('-translate-x-full')) {
+        sidebar.classList.add('-translate-x-full');
+        if (sidebarOverlay) sidebarOverlay.classList.remove('active');
+    }
+
+    // 6. Modo Foco (Ocultar cabeçalho em telas de onboarding ou questionários do participante)
+    const header = document.querySelector('header');
+    const isFocusView = ['tcle', 'profile', 'pre-efficacy', 'pre-test', 'efficacy', 'ux'].includes(v);
+    if (header) {
+        if (isFocusView) {
+            header.classList.add('hidden');
+        } else {
+            header.classList.remove('hidden');
+        }
+    }
+    const progBar = document.getElementById('research-progress-bar');
+    if (progBar && v !== 'developer') {
+        if (isFocusView) {
+            progBar.classList.replace('top-20', 'top-0');
+        } else {
+            progBar.classList.replace('top-0', 'top-20');
+        }
+    }
+
+    // 7. Atualizar a barra de progresso visual do funil
+    if (window.updateFunnelProgress) {
+        window.updateFunnelProgress(v);
+    }
+};
+
+window.updateFunnelProgress = (currentView) => {
+    const hasTCLE = localStorage.getItem('study_tcle_accepted') === 'true';
+    const hasProfile = localStorage.getItem('study_profile_done') === 'true';
+    const hasBaseline = localStorage.getItem('study_baseline_done') === 'true';
+    const hasTraining = localStorage.getItem('study_training_done') === 'true';
+    const hasPostTest = localStorage.getItem('study_final_test_done') === 'true';
+
+    // Ocultar a barra de progresso se estiver no painel do desenvolvedor
+    const progBar = document.getElementById('research-progress-bar');
+    if (progBar) {
+        if (currentView === 'developer') {
+            progBar.style.display = 'none';
+        } else {
+            progBar.style.display = 'block';
+        }
+    }
+
+    // Mostrar/ocultar o lembrete de pós-teste
+    const reminderBanner = document.getElementById('training-reminder-banner');
+    if (reminderBanner) {
+        const isTrainingView = ['introducao', 'seguranca', 'teoria', 'diferencas', 'leigos', 'diferenciacao', 'dea', 'ovace', 'metronomo', 'flashcards', 'duvidas', 'glossario', 'hero'].includes(currentView);
+        const hasPostTest = localStorage.getItem('study_final_test_done') === 'true';
+        
+        if (isTrainingView && !hasPostTest && currentView !== 'developer') {
+            reminderBanner.style.display = 'block';
+        } else {
+            reminderBanner.style.display = 'none';
+        }
+    }
+
+    if (currentView === 'developer') return;
+
+    let activeStep = 1;
+    if (!hasTCLE) {
+        activeStep = 1;
+    } else if (!hasProfile) {
+        activeStep = 2;
+    } else if (!hasBaseline) {
+        activeStep = 3;
+    } else if (!hasTraining && currentView !== 'pratica' && currentView !== 'avaliacao-final') {
+        activeStep = 4;
+    } else if (!hasPostTest || currentView === 'pratica' || currentView === 'avaliacao-final') {
+        activeStep = 5;
+    } else {
+        activeStep = 6;
+    }
+
+    const steps = [
+        { id: 'tcle', num: 1, label: 'Termo' },
+        { id: 'profile', num: 2, label: 'Perfil' },
+        { id: 'pre', num: 3, label: 'Pré-Teste' },
+        { id: 'learn', num: 4, label: 'Treinamento' },
+        { id: 'post', num: 5, label: 'Pós-Teste' },
+        { id: 'done', num: 6, label: 'Conclusão' }
+    ];
+
+    steps.forEach(s => {
+        const container = document.getElementById(`prog-step-${s.id}`);
+        const icon = document.getElementById(`prog-icon-${s.id}`);
+        if (!container || !icon) return;
+
+        if (s.num < activeStep) {
+            // Completo (Verde)
+            container.className = "flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 shrink-0 font-bold transition-all";
+            icon.className = "w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[9px] font-bold transition-all";
+            icon.innerHTML = "✓";
+        } else if (s.num === activeStep) {
+            // Ativo (Azul com pulse)
+            container.className = "flex items-center gap-1.5 text-blue-600 dark:text-blue-400 shrink-0 font-black transition-all";
+            icon.className = "w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[9px] font-bold animate-pulse transition-all";
+            icon.innerHTML = s.num.toString();
+        } else {
+            // Inativo (Cinza)
+            container.className = "flex items-center gap-1.5 text-slate-400 dark:text-slate-500 shrink-0 transition-all";
+            icon.className = "w-5 h-5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 flex items-center justify-center text-[9px] font-bold transition-all";
+            icon.innerHTML = s.num.toString();
+        }
+    });
+};
+
+window.loadDeveloperData = async () => {
+    const container = document.getElementById('developer-table-container');
+    if (container) {
+        container.innerHTML = `
+            <div class="text-center py-16 text-slate-500 dark:text-slate-400">
+                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-700 dark:border-blue-500 mb-4"></div>
+                <p class="text-sm font-bold uppercase tracking-wider">Carregando dados da pesquisa...</p>
+            </div>
+        `;
+    }
+
+    try {
+        // Busca todas as tabelas em paralelo
+        const [
+            { data: rawParticipantes, error: errPart },
+            { data: rawQuizAttempts, error: errQuiz },
+            { data: rawEfficacy, error: errEff },
+            { data: rawUx, error: errUx }
+        ] = await Promise.all([
+            window.supabaseClient.from('participantes').select('*'),
+            window.supabaseClient.from('quiz_attempts').select('*'),
+            window.supabaseClient.from('autoeficacia_usabilidade').select('*'),
+            window.supabaseClient.from('ux_evaluation').select('*')
+        ]);
+
+        if (errPart || errQuiz || errEff || errUx) {
+            console.error("Supabase Query Error Details:", { errPart, errQuiz, errEff, errUx });
+            throw new Error("Erro ao consultar tabelas do Supabase");
+        }
+
+        const participantes = rawParticipantes || [];
+        const quizAttempts = rawQuizAttempts || [];
+        const efficacy = rawEfficacy || [];
+        const ux = rawUx || [];
+
+        // Consolidação por user_id
+        const userMap = {};
+
+        const getUserEntry = (userId) => {
+            if (!userId) userId = 'desconhecido';
+            if (!userMap[userId]) {
+                userMap[userId] = {
+                    user_id: userId,
+                    created_at: null,
+                    idade: "",
+                    genero: "",
+                    setor: "",
+                    vinculo: "",
+                    experiencia_previa: "",
+                    pre_test: null,
+                    post_test: null,
+                    pre_efficacy: {},
+                    post_efficacy: {},
+                    ux: null
+                };
+            }
+            return userMap[userId];
+        };
+
+        // 1. Demografia
+        participantes.forEach(p => {
+            const entry = getUserEntry(p.user_id);
+            entry.created_at = p.created_at;
+            entry.idade = p.idade || "";
+            entry.genero = p.genero || "";
+            entry.setor = p.setor || "";
+            entry.vinculo = p.vinculo || "";
+            entry.experiencia_previa = p.experiencia_previa || "";
+        });
+
+        // 2. Resultados de Quiz
+        quizAttempts.forEach(q => {
+            const entry = getUserEntry(q.user_id);
+            if (!entry.created_at && q.created_at) entry.created_at = q.created_at;
+            
+            if (q.type === 'pre_teste') {
+                entry.pre_test = {
+                    score: q.score,
+                    total: q.total,
+                    percent: q.percent,
+                    date: q.date
+                };
+            } else if (q.type === 'avaliacao' || q.type === 'avaliacao_final') {
+                entry.post_test = {
+                    score: q.score,
+                    total: q.total,
+                    percent: q.percent,
+                    date: q.date
+                };
+            }
+        });
+
+        // 3. Autoeficácia
+        efficacy.forEach(e => {
+            const entry = getUserEntry(e.user_id);
+            if (e.fase === 'pre') {
+                entry.pre_efficacy[e.pergunta_id] = e.valor;
+            } else if (e.fase === 'pos') {
+                entry.post_efficacy[e.pergunta_id] = e.valor;
+            }
+        });
+
+        // 4. UX e Usabilidade
+        ux.forEach(u => {
+            const entry = getUserEntry(u.user_id);
+            entry.ux = {
+                ux1: u.ux1,
+                ux2: u.ux2,
+                ux3: u.ux3,
+                ux4: u.ux4,
+                ux5: u.ux5,
+                suggestions: u.suggestions
+            };
+        });
+
+        // Convert map to array and sort by date desc
+        const usersList = Object.values(userMap).sort((a, b) => {
+            const dateA = a.created_at ? new Date(a.created_at) : new Date(0);
+            const dateB = b.created_at ? new Date(b.created_at) : new Date(0);
+            return dateB - dateA;
+        });
+
+        window.allDeveloperUsers = usersList;
+        window.currentDevUsers = usersList;
+        
+        window.renderDeveloperMetrics(usersList);
+        window.renderDeveloperData(usersList);
+
+    } catch (err) {
+        console.error("Erro ao carregar dados do painel do desenvolvedor:", err);
+        if (container) {
+            container.innerHTML = `
+                <div class="text-center py-16 text-rose-600 dark:text-rose-500">
+                    <p class="font-black text-xl mb-2">Falha na Conexão Supabase</p>
+                    <p class="text-xs text-slate-500 mb-6">Não foi possível recuperar os dados de pesquisa. Verifique seu console para detalhes.</p>
+                    <button onclick="window.loadDeveloperData()" class="bg-rose-600 text-white px-6 py-3 rounded-xl font-bold uppercase text-xs">Tentar Novamente</button>
+                </div>
+            `;
+        }
+    }
+};
+
+window.renderDeveloperMetrics = (users) => {
+    const total = users.length;
+    
+    // Calculates averages
+    let preSum = 0, preCount = 0;
+    let postSum = 0, postCount = 0;
+    
+    let effPreSum = 0, effPreCount = 0;
+    let effPostSum = 0, effPostCount = 0;
+    let susSum = 0, susCount = 0;
+    
+    users.forEach(u => {
+        // Quiz
+        if (u.pre_test && typeof u.pre_test.percent === 'number') {
+            preSum += u.pre_test.percent;
+            preCount++;
+        }
+        if (u.post_test && typeof u.post_test.percent === 'number') {
+            postSum += u.post_test.percent;
+            postCount++;
+        }
+        
+        // Autoeficácia Pré
+        if (u.pre_efficacy) {
+            Object.values(u.pre_efficacy).forEach(val => {
+                if (typeof val === 'number') {
+                    effPreSum += val;
+                    effPreCount++;
+                }
+            });
+        }
+        
+        // Autoeficácia Pós
+        if (u.post_efficacy) {
+            Object.values(u.post_efficacy).forEach(val => {
+                if (typeof val === 'number') {
+                    effPostSum += val;
+                    effPostCount++;
+                }
+            });
+        }
+        
+        // Usabilidade SUS
+        if (u.ux) {
+            const vals = [u.ux.ux1, u.ux.ux2, u.ux.ux3, u.ux.ux4, u.ux.ux5].filter(v => typeof v === 'number');
+            if (vals.length > 0) {
+                susSum += vals.reduce((a,b)=>a+b, 0) / vals.length;
+                susCount++;
+            }
+        }
+    });
+
+    const preAvg = preCount > 0 ? Math.round(preSum / preCount) : 0;
+    const postAvg = postCount > 0 ? Math.round(postSum / postCount) : 0;
+    const gain = postAvg - preAvg;
+    
+    const effPreAvg = effPreCount > 0 ? (effPreSum / effPreCount).toFixed(2) : "0.00";
+    const effPostAvg = effPostCount > 0 ? (effPostSum / effPostCount).toFixed(2) : "0.00";
+    const susAvg = susCount > 0 ? (susSum / susCount).toFixed(2) : "0.00";
+
+    document.getElementById('dev-metric-total').innerText = total;
+    document.getElementById('dev-metric-pre-avg').innerText = `${preAvg}%`;
+    document.getElementById('dev-metric-post-avg').innerText = `${postAvg}%`;
+    document.getElementById('dev-metric-gain').innerText = `${gain >= 0 ? '+' : ''}${gain}%`;
+    
+    const metricEffPre = document.getElementById('dev-metric-eff-pre');
+    const metricEffPost = document.getElementById('dev-metric-eff-post');
+    const metricSusAvg = document.getElementById('dev-metric-sus-avg');
+    
+    if (metricEffPre) metricEffPre.innerText = `${effPreAvg} / 5`;
+    if (metricEffPost) metricEffPost.innerText = `${effPostAvg} / 5`;
+    if (metricSusAvg) metricSusAvg.innerText = `${susAvg} / 5`;
+};
+
+window.currentDevTab = 'reports';
+
+window.switchDevTab = (tab) => {
+    window.currentDevTab = tab;
+    const btnReports = document.getElementById('dev-tab-reports');
+    const btnTable = document.getElementById('dev-tab-table');
+    const btnStats = document.getElementById('dev-tab-stats');
+    if (!btnReports || !btnTable) return;
+    
+    const activeClass = "flex-1 sm:flex-none text-center px-6 py-3 font-black text-xs uppercase tracking-wide rounded-xl bg-blue-600 text-white shadow-md transition-all focus:outline-none ml-2";
+    const activeFirstClass = "flex-1 sm:flex-none text-center px-6 py-3 font-black text-xs uppercase tracking-wide rounded-xl bg-blue-600 text-white shadow-md transition-all focus:outline-none";
+    const inactiveClass = "flex-1 sm:flex-none text-center px-6 py-3 font-bold text-xs uppercase tracking-wide rounded-xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 transition-all focus:outline-none ml-2";
+    const inactiveFirstClass = "flex-1 sm:flex-none text-center px-6 py-3 font-bold text-xs uppercase tracking-wide rounded-xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 transition-all focus:outline-none";
+
+    btnReports.className = tab === 'reports' ? activeFirstClass : inactiveFirstClass;
+    btnTable.className = tab === 'table' ? activeClass : inactiveClass;
+    if (btnStats) btnStats.className = tab === 'stats' ? activeClass : inactiveClass;
+    
+    if (window.currentDevUsers) {
+        window.renderDeveloperData(window.currentDevUsers);
+    } else if (window.allDeveloperUsers) {
+        window.filterDeveloperData();
+    }
+};
+
+window.renderDeveloperData = (users) => {
+    if (window.currentDevTab === 'reports') {
+        window.renderDeveloperReports(users);
+    } else if (window.currentDevTab === 'table') {
+        window.renderDeveloperTable(users);
+    } else if (window.currentDevTab === 'stats') {
+        window.renderDeveloperStats(users);
+    }
+};
+
+window.renderDeveloperReports = (users) => {
+    const container = document.getElementById('developer-table-container');
+    if (!container) return;
+
+    if (users.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-16 text-slate-500 dark:text-slate-400">
+                <p class="text-lg font-bold">Nenhum participante encontrado</p>
+                <p class="text-xs">Tente ajustar seus filtros de busca.</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="grid grid-cols-1 gap-8 p-4 bg-slate-50 dark:bg-slate-900/60 rounded-[2.5rem]">
+            ${users.map((u, i) => {
+                const dispId = u.user_id.startsWith('anon-') ? `Anon (${u.user_id.slice(-6)})` : u.user_id;
+                const preText = u.pre_test ? `${u.pre_test.percent}% (${u.pre_test.score}/${u.pre_test.total})` : "Não realizado";
+                const postText = u.post_test ? `${u.post_test.percent}% (${u.post_test.score}/${u.post_test.total})` : "Não realizado";
+                
+                let evolutionText = "—";
+                let evolutionClass = "text-purple-600 dark:text-purple-400";
+                if (u.pre_test && u.post_test && typeof u.pre_test.percent === 'number' && typeof u.post_test.percent === 'number') {
+                    const diff = u.post_test.percent - u.pre_test.percent;
+                    evolutionText = `${diff >= 0 ? '+' : ''}${diff}%`;
+                    if (diff > 0) {
+                        evolutionClass = "text-emerald-600 dark:text-emerald-500";
+                    } else if (diff < 0) {
+                        evolutionClass = "text-rose-600 dark:text-rose-455";
+                    } else {
+                        evolutionClass = "text-slate-500 dark:text-slate-400";
+                    }
+                }
+                
+                const preEffVals = Object.values(u.pre_efficacy).filter(v => typeof v === 'number');
+                const preEffAvg = preEffVals.length > 0 ? (preEffVals.reduce((a,b)=>a+b, 0) / preEffVals.length).toFixed(1) : "—";
+                
+                const postEffVals = Object.values(u.post_efficacy).filter(v => typeof v === 'number');
+                const postEffAvg = postEffVals.length > 0 ? (postEffVals.reduce((a,b)=>a+b, 0) / postEffVals.length).toFixed(1) : "—";
+                
+                const uxAvg = u.ux ? (((u.ux.ux1 || 0) + (u.ux.ux2 || 0) + (u.ux.ux3 || 0) + (u.ux.ux4 || 0) + (u.ux.ux5 || 0)) / 5).toFixed(1) : "—";
+                
+                const preEffList = [1,2,3,4].map(idx => `<div>Questão ${idx}: <span class="font-black text-blue-700 dark:text-blue-400">${(u.pre_efficacy[idx] !== undefined && u.pre_efficacy[idx] !== null) ? u.pre_efficacy[idx] : '—'}/5</span></div>`).join(' • ');
+                const postEffList = [1,2,3,4].map(idx => `<div>Questão ${idx}: <span class="font-black text-rose-700 dark:text-rose-400">${(u.post_efficacy[idx] !== undefined && u.post_efficacy[idx] !== null) ? u.post_efficacy[idx] : '—'}/5</span></div>`).join(' • ');
+                const uxList = [1,2,3,4,5].map(idx => `<div>SUS ${idx}: <span class="font-black text-emerald-700 dark:text-emerald-400">${(u.ux && u.ux[`ux${idx}`] !== undefined && u.ux[`ux${idx}`] !== null) ? u.ux[`ux${idx}`] : '—'}/5</span></div>`).join(' • ');
+
+                return `
+                    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2rem] p-6 lg:p-8 shadow-md hover:shadow-lg transition-all relative overflow-hidden">
+                        <!-- Card Border Tag -->
+                        <div class="absolute top-0 left-0 w-2 h-full bg-blue-600"></div>
+                        
+                        <!-- Header -->
+                        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 mb-6 border-b border-slate-100 dark:border-slate-800 w-full">
+                            <div>
+                                <span class="text-xs uppercase tracking-widest font-black text-slate-400 dark:text-slate-500">Participante</span>
+                                <div class="flex flex-wrap items-center gap-3 mt-1">
+                                    <h4 class="text-xl font-black text-slate-900 dark:text-white">${dispId}</h4>
+                                    <button onclick="window.deleteUserRecord('${u.user_id}')" class="text-rose-600 dark:text-rose-455 hover:text-rose-800 dark:hover:text-rose-300 transition-colors text-[9px] font-black uppercase tracking-wider flex items-center gap-1 bg-rose-50 dark:bg-rose-950/30 px-2.5 py-1.5 rounded-xl border border-rose-100 dark:border-rose-900/30">
+                                        🗑️ Excluir
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="text-right mt-2 sm:mt-0">
+                                <span class="text-[10px] bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-3 py-1.5 rounded-xl font-black uppercase">${u.setor || 'Setor N/A'}</span>
+                                <div class="text-[10px] text-slate-400 mt-1.5">${u.created_at ? new Date(u.created_at).toLocaleString('pt-BR') : 'Data N/A'}</div>
+                            </div>
+                        </div>
+
+                        <!-- Data Grid -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                            <!-- Demografia -->
+                            <div class="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80">
+                                <h5 class="text-[10px] font-black uppercase text-slate-400 mb-2">1. Perfil Demográfico</h5>
+                                <div class="space-y-1.5 text-xs text-slate-700 dark:text-slate-300">
+                                    <p><span class="font-normal opacity-70">Idade:</span> ${u.idade ? u.idade + ' anos' : 'N/A'}</p>
+                                    <p><span class="font-normal opacity-70">Gênero:</span> ${u.genero || 'N/A'}</p>
+                                    <p><span class="font-normal opacity-70">Vínculo:</span> ${u.vinculo || 'N/A'}</p>
+                                    <p><span class="font-normal opacity-70">Exp. Prévia:</span> ${u.experiencia_previa || 'N/A'}</p>
+                                </div>
+                            </div>
+
+                            <!-- Notas Testes -->
+                            <div class="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80">
+                                <h5 class="text-[10px] font-black uppercase text-slate-400 mb-2">2. Conhecimento Teórico</h5>
+                                <div class="space-y-1.5 text-xs">
+                                    <p class="text-amber-600 dark:text-amber-500 font-bold"><span class="font-normal text-slate-700 dark:text-slate-300 opacity-70">Pré-Teste:</span> ${preText}</p>
+                                    <p class="text-rose-600 dark:text-rose-400 font-bold"><span class="font-normal text-slate-700 dark:text-slate-300 opacity-70">Pós-Teste:</span> ${postText}</p>
+                                    <p class="${evolutionClass} font-bold"><span class="font-normal text-slate-700 dark:text-slate-300 opacity-70">Evolução:</span> ${evolutionText}</p>
+                                </div>
+                            </div>
+
+                            <!-- Autoeficácia -->
+                            <div class="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80 md:col-span-2">
+                                <h5 class="text-[10px] font-black uppercase text-slate-400 mb-2">3. Autoeficácia (Médias: Pré ${preEffAvg} | Pós ${postEffAvg})</h5>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-[10px]">
+                                    <div class="space-y-1">
+                                        <div class="font-black text-blue-750 dark:text-blue-400">PRÉ-TREINO:</div>
+                                        <div class="flex flex-wrap gap-x-2 gap-y-0.5 text-slate-600 dark:text-slate-400">${preEffList}</div>
+                                    </div>
+                                    <div class="space-y-1">
+                                        <div class="font-black text-rose-750 dark:text-rose-400">PÓS-TREINO:</div>
+                                        <div class="flex flex-wrap gap-x-2 gap-y-0.5 text-slate-600 dark:text-slate-400">${postEffList}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Usabilidade & Comentários -->
+                        <div class="mt-6 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80 grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div class="md:col-span-1">
+                                <h5 class="text-[10px] font-black uppercase text-slate-400 mb-2">4. Usabilidade SUS (Média: ${uxAvg})</h5>
+                                <div class="flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-slate-600 dark:text-slate-400">
+                                    ${uxList}
+                                </div>
+                            </div>
+                            <div class="md:col-span-2">
+                                <h5 class="text-[10px] font-black uppercase text-slate-400 mb-2">5. Sugestões e Comentários</h5>
+                                <p class="text-xs italic text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-100 dark:border-slate-850 min-h-[40px]">
+                                    "${u.ux && u.ux.suggestions ? u.ux.suggestions : 'Nenhuma sugestão enviada.'}"
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+};
+
+window.renderDeveloperTable = (users) => {
+    const container = document.getElementById('developer-table-container');
+    if (!container) return;
+
+    if (users.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-16 text-slate-500 dark:text-slate-400">
+                <p class="text-lg font-bold">Nenhum participante encontrado</p>
+                <p class="text-xs">Tente ajustar seus filtros de busca.</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = `
+        <table class="w-full text-left border-collapse min-w-[1000px]">
+            <thead>
+                <tr class="bg-slate-50 dark:bg-slate-800 border-b border-slate-100 dark:border-slate-800 text-[10px] uppercase font-black tracking-widest text-slate-400 dark:text-slate-500">
+                    <th class="p-6">Participante</th>
+                    <th class="p-6">Setor / Vínculo</th>
+                    <th class="p-6">Pré-Teste</th>
+                    <th class="p-6">Pós-Teste</th>
+                    <th class="p-6">Evolução</th>
+                    <th class="p-6">Confiança Pré</th>
+                    <th class="p-6">Confiança Pós</th>
+                    <th class="p-6">Aproveitamento UX</th>
+                    <th class="p-6 text-center">Ficha</th>
+                </tr>
+            </thead>
+            <tbody class="text-xs font-bold text-slate-700 dark:text-slate-300 divide-y divide-slate-100 dark:divide-slate-800">
+                ${users.map((u, i) => {
+                    const dispId = u.user_id.startsWith('anon-') ? `Anon (${u.user_id.slice(-6)})` : u.user_id;
+                    const preText = u.pre_test ? `${u.pre_test.percent}% (${u.pre_test.score}/${u.pre_test.total})` : "—";
+                    const postText = u.post_test ? `${u.post_test.percent}% (${u.post_test.score}/${u.post_test.total})` : "—";
+                    
+                    let evolutionText = "—";
+                    let evolutionClass = "text-purple-600 dark:text-purple-400";
+                    if (u.pre_test && u.post_test && typeof u.pre_test.percent === 'number' && typeof u.post_test.percent === 'number') {
+                        const diff = u.post_test.percent - u.pre_test.percent;
+                        evolutionText = `${diff >= 0 ? '+' : ''}${diff}%`;
+                        if (diff > 0) {
+                            evolutionClass = "text-emerald-600 dark:text-emerald-500";
+                        } else if (diff < 0) {
+                            evolutionClass = "text-rose-600 dark:text-rose-455";
+                        } else {
+                            evolutionClass = "text-slate-500 dark:text-slate-400";
+                        }
+                    }
+
+                    // Self efficacy scores averages
+                    const preEffVals = Object.values(u.pre_efficacy).filter(v => typeof v === 'number');
+                    const preEffAvg = preEffVals.length > 0 ? (preEffVals.reduce((a,b)=>a+b, 0) / preEffVals.length).toFixed(1) : "—";
+                    
+                    const postEffVals = Object.values(u.post_efficacy).filter(v => typeof v === 'number');
+                    const postEffAvg = postEffVals.length > 0 ? (postEffVals.reduce((a,b)=>a+b, 0) / postEffVals.length).toFixed(1) : "—";
+                    
+                    // UX SUS average
+                    const uxAvg = u.ux ? (((u.ux.ux1 || 0) + (u.ux.ux2 || 0) + (u.ux.ux3 || 0) + (u.ux.ux4 || 0) + (u.ux.ux5 || 0)) / 5).toFixed(1) : "—";
+
+                    return `
+                        <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-all">
+                            <td class="p-6">
+                                <div class="font-black text-slate-900 dark:text-white">${dispId}</div>
+                                <div class="text-[9px] font-normal text-slate-400 mt-0.5">${u.idade ? u.idade + ' anos' : 'Idade N/A'} • ${u.genero || 'Gênero N/A'}</div>
+                            </td>
+                            <td class="p-6">
+                                <div class="font-black text-blue-700 dark:text-blue-400 uppercase text-[10px]">${u.setor || 'N/A'}</div>
+                                <div class="text-[9px] font-normal text-slate-400 mt-0.5">${u.vinculo || 'Vínculo N/A'}</div>
+                            </td>
+                            <td class="p-6 text-amber-600 dark:text-amber-500">${preText}</td>
+                            <td class="p-6 text-rose-600 dark:text-rose-400">${postText}</td>
+                            <td class="p-6 ${evolutionClass}">${evolutionText}</td>
+                            <td class="p-6">${preEffAvg}</td>
+                            <td class="p-6">${postEffAvg}</td>
+                            <td class="p-6 text-emerald-600 dark:text-emerald-500">${uxAvg}</td>
+                            <td class="p-6 text-center">
+                                <div class="flex items-center justify-center gap-2">
+                                    <button onclick="window.showDevDetails('${u.user_id}')" class="bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 p-2 px-3 rounded-lg hover:bg-blue-100 transition-all text-xs font-bold">
+                                        Visualizar
+                                    </button>
+                                    <button onclick="window.deleteUserRecord('${u.user_id}')" class="bg-rose-50 dark:bg-rose-950/30 text-rose-650 dark:text-rose-455 p-2 px-3 rounded-lg hover:bg-rose-100 transition-all text-xs font-bold">
+                                        Excluir
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }).join('')}
+            </tbody>
+        </table>
+    `;
+};
+
+window.renderDeveloperStats = (users) => {
+    const container = document.getElementById('developer-table-container');
+    if (!container) return;
+
+    if (users.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-16 text-slate-500 dark:text-slate-400">
+                <p class="text-lg font-bold">Nenhum participante encontrado</p>
+                <p class="text-xs">Tente ajustar seus filtros de busca.</p>
+            </div>
+        `;
+        return;
+    }
+
+    const aggregateBy = (keyName, getGroupVal) => {
+        const groups = {};
+        users.forEach(u => {
+            let val = getGroupVal(u);
+            if (val === undefined || val === null || val.trim() === "") val = "Não Informado";
+            if (!groups[val]) {
+                groups[val] = {
+                    name: val,
+                    count: 0,
+                    preSum: 0, preCount: 0,
+                    postSum: 0, postCount: 0,
+                    effPreSum: 0, effPreCount: 0,
+                    effPostSum: 0, effPostCount: 0,
+                    susSum: 0, susCount: 0
+                };
+            }
+            const g = groups[val];
+            g.count++;
+            
+            // Quiz
+            if (u.pre_test && typeof u.pre_test.percent === 'number') {
+                g.preSum += u.pre_test.percent;
+                g.preCount++;
+            }
+            if (u.post_test && typeof u.post_test.percent === 'number') {
+                g.postSum += u.post_test.percent;
+                g.postCount++;
+            }
+            
+            // Autoeficácia Pré
+            if (u.pre_efficacy) {
+                Object.values(u.pre_efficacy).forEach(val => {
+                    if (typeof val === 'number') {
+                        g.effPreSum += val;
+                        g.effPreCount++;
+                    }
+                });
+            }
+            // Autoeficácia Pós
+            if (u.post_efficacy) {
+                Object.values(u.post_efficacy).forEach(val => {
+                    if (typeof val === 'number') {
+                        g.effPostSum += val;
+                        g.effPostCount++;
+                    }
+                });
+            }
+            
+            // Usabilidade SUS
+            if (u.ux) {
+                const susVals = [u.ux.ux1, u.ux.ux2, u.ux.ux3, u.ux.ux4, u.ux.ux5].filter(v => typeof v === 'number');
+                if (susVals.length > 0) {
+                    g.susSum += susVals.reduce((a,b)=>a+b, 0) / susVals.length;
+                    g.susCount++;
+                }
+            }
+        });
+        
+        return Object.values(groups).map(g => {
+            const preAvg = g.preCount > 0 ? Math.round(g.preSum / g.preCount) : null;
+            const postAvg = g.postCount > 0 ? Math.round(g.postSum / g.postCount) : null;
+            const gain = (preAvg !== null && postAvg !== null) ? (postAvg - preAvg) : null;
+            const effPreAvg = g.effPreCount > 0 ? (g.effPreSum / g.effPreCount).toFixed(2) : "—";
+            const effPostAvg = g.effPostCount > 0 ? (g.effPostSum / g.effPostCount).toFixed(2) : "—";
+            const susAvg = g.susCount > 0 ? (g.susSum / g.susCount).toFixed(2) : "—";
+            
+            return {
+                name: g.name,
+                count: g.count,
+                preAvg: preAvg !== null ? `${preAvg}%` : "—",
+                postAvg: postAvg !== null ? `${postAvg}%` : "—",
+                gain: gain !== null ? `${gain >= 0 ? '+' : ''}${gain}%` : "—",
+                effPreAvg,
+                effPostAvg,
+                susAvg
+            };
+        });
+    };
+
+    const sectorStats = aggregateBy("Setor", u => u.setor);
+    const expStats = aggregateBy("Experiência Prévia", u => u.experiencia_previa);
+
+    const getTableHTML = (title, stats) => {
+        let totalN = 0;
+        let preSum = 0, preCount = 0;
+        let postSum = 0, postCount = 0;
+        let effPreSum = 0, effPreCount = 0;
+        let effPostSum = 0, effPostCount = 0;
+        let susSum = 0, susCount = 0;
+        
+        stats.forEach(s => totalN += s.count);
+        
+        users.forEach(u => {
+            if (u.pre_test && typeof u.pre_test.percent === 'number') {
+                preSum += u.pre_test.percent;
+                preCount++;
+            }
+            if (u.post_test && typeof u.post_test.percent === 'number') {
+                postSum += u.post_test.percent;
+                postCount++;
+            }
+            if (u.pre_efficacy) {
+                Object.values(u.pre_efficacy).forEach(val => {
+                    if (typeof val === 'number') { effPreSum += val; effPreCount++; }
+                });
+            }
+            if (u.post_efficacy) {
+                Object.values(u.post_efficacy).forEach(val => {
+                    if (typeof val === 'number') { effPostSum += val; effPostCount++; }
+                });
+            }
+            if (u.ux) {
+                const susVals = [u.ux.ux1, u.ux.ux2, u.ux.ux3, u.ux.ux4, u.ux.ux5].filter(v => typeof v === 'number');
+                if (susVals.length > 0) {
+                    susSum += susVals.reduce((a,b)=>a+b, 0) / susVals.length;
+                    susCount++;
+                }
+            }
+        });
+        
+        const totalPreAvg = preCount > 0 ? `${Math.round(preSum / preCount)}%` : "—";
+        const totalPostAvg = postCount > 0 ? `${Math.round(postSum / postCount)}%` : "—";
+        const totalGainVal = (preCount > 0 && postCount > 0) ? (Math.round(postSum / postCount) - Math.round(preSum / preCount)) : null;
+        const totalGain = totalGainVal !== null ? `${totalGainVal >= 0 ? '+' : ''}${totalGainVal}%` : "—";
+        const totalEffPreAvg = effPreCount > 0 ? (effPreSum / effPreCount).toFixed(2) : "—";
+        const totalEffPostAvg = effPostCount > 0 ? (effPostSum / effPostCount).toFixed(2) : "—";
+        const totalSusAvg = susCount > 0 ? (susSum / susCount).toFixed(2) : "—";
+
+        return `
+            <div class="p-6 lg:p-8 space-y-4">
+                <h4 class="text-base font-black text-slate-800 dark:text-white uppercase tracking-wide border-b pb-3 border-slate-100 dark:border-slate-800 flex items-center gap-2">
+                    <span>${title}</span>
+                </h4>
+                <div class="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 shadow-inner bg-slate-50/50 dark:bg-slate-900/20">
+                    <table class="w-full text-left border-collapse min-w-[800px]">
+                        <thead>
+                            <tr class="bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-[10px] uppercase font-black tracking-widest text-slate-400 dark:text-slate-500">
+                                <th class="p-4 pl-6">Grupo / Categoria</th>
+                                <th class="p-4 text-center">N (Amostra)</th>
+                                <th class="p-4 text-center">Média Pré</th>
+                                <th class="p-4 text-center">Média Pós</th>
+                                <th class="p-4 text-center">Ganho Teórico</th>
+                                <th class="p-4 text-center">Confiança Pré (1-5)</th>
+                                <th class="p-4 text-center">Confiança Pós (1-5)</th>
+                                <th class="p-4 text-center">Usabilidade SUS (1-5)</th>
+                            </tr>
+                        </thead>
+                        <tbody class="text-xs font-bold text-slate-700 dark:text-slate-300 divide-y divide-slate-100 dark:divide-slate-800">
+                            ${stats.map(s => {
+                                let gainClass = "text-purple-600 dark:text-purple-400";
+                                if (s.gain !== "—") {
+                                    const gNum = parseFloat(s.gain);
+                                    if (gNum > 0) gainClass = "text-emerald-600 dark:text-emerald-500";
+                                    else if (gNum < 0) gainClass = "text-rose-600 dark:text-rose-455";
+                                }
+                                return `
+                                    <tr class="hover:bg-white dark:hover:bg-slate-900/40 transition-all">
+                                        <td class="p-4 pl-6 font-black text-slate-900 dark:text-white">${s.name}</td>
+                                        <td class="p-4 text-center font-normal text-slate-500">${s.count}</td>
+                                        <td class="p-4 text-center text-amber-600 dark:text-amber-500">${s.preAvg}</td>
+                                        <td class="p-4 text-center text-rose-600 dark:text-rose-400">${s.postAvg}</td>
+                                        <td class="p-4 text-center ${gainClass}">${s.gain}</td>
+                                        <td class="p-4 text-center text-blue-600 dark:text-blue-400">${s.effPreAvg}</td>
+                                        <td class="p-4 text-center text-rose-700 dark:text-rose-400">${s.effPostAvg}</td>
+                                        <td class="p-4 text-center text-emerald-600 dark:text-emerald-500">${s.susAvg}</td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                            <tr class="bg-slate-100/50 dark:bg-slate-800/40 font-black border-t-2 border-slate-200 dark:border-slate-700">
+                                <td class="p-4 pl-6 text-slate-900 dark:text-white uppercase tracking-wider">TOTAL GERAL (Média)</td>
+                                <td class="p-4 text-center text-slate-900 dark:text-white font-black">${totalN}</td>
+                                <td class="p-4 text-center text-amber-600 dark:text-amber-500">${totalPreAvg}</td>
+                                <td class="p-4 text-center text-rose-600 dark:text-rose-400">${totalPostAvg}</td>
+                                <td class="p-4 text-center ${totalGainVal >= 0 ? 'text-emerald-600 dark:text-emerald-500' : 'text-rose-600 dark:text-rose-455'}">${totalGain}</td>
+                                <td class="p-4 text-center text-blue-600 dark:text-blue-400">${totalEffPreAvg}</td>
+                                <td class="p-4 text-center text-rose-700 dark:text-rose-400">${totalEffPostAvg}</td>
+                                <td class="p-4 text-center text-emerald-600 dark:text-emerald-500">${totalSusAvg}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    };
+
+    container.innerHTML = `
+        <div class="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl">
+            ${getTableHTML("1. Análise Estatística por Setor Assistencial / Administrativo", sectorStats)}
+            ${getTableHTML("2. Análise Estatística por Experiência Prévia em SBV", expStats)}
+        </div>
+    `;
+};
+
+window.filterDeveloperData = () => {
+    const searchVal = document.getElementById('dev-filter-search')?.value.toLowerCase() || "";
+    const sectorVal = document.getElementById('dev-filter-sector')?.value || "";
+    const expVal = document.getElementById('dev-filter-exp')?.value || "";
+
+    const filtered = window.allDeveloperUsers.filter(u => {
+        const matchesSearch = u.user_id.toLowerCase().includes(searchVal) ||
+            (u.setor || "").toLowerCase().includes(searchVal) ||
+            (u.genero || "").toLowerCase().includes(searchVal);
+            
+        const matchesSector = sectorVal === "" || u.setor === sectorVal;
+        const matchesExp = expVal === "" || u.experiencia_previa === expVal;
+        
+        return matchesSearch && matchesSector && matchesExp;
+    });
+
+    window.currentDevUsers = filtered;
+    window.renderDeveloperData(filtered);
+    window.renderDeveloperMetrics(filtered);
+};
+
+window.exportDeveloperCSV = () => {
+    if (!window.currentDevUsers || window.currentDevUsers.length === 0) {
+        alert("Nenhum dado disponível para exportar.");
+        return;
+    }
+
+    const headers = [
+        "ID Usuario", "Data Registro",
+        "Idade", "Genero", "Setor", "Vinculo", "Experiencia Previa",
+        "Pre-Teste Acertos", "Pre-Teste Total", "Pre-Teste Porcentagem (0-100)",
+        "Pos-Teste Acertos", "Pos-Teste Total", "Pos-Teste Porcentagem (0-100)",
+        "Evolucao Notas (Pos - Pre)",
+        "Autoeficacia Pre Q1", "Autoeficacia Pre Q2", "Autoeficacia Pre Q3", "Autoeficacia Pre Q4",
+        "Autoeficacia Pre Media (1-5)",
+        "Autoeficacia Pos Q1", "Autoeficacia Pos Q2", "Autoeficacia Pos Q3", "Autoeficacia Pos Q4",
+        "Autoeficacia Pos Media (1-5)",
+        "Evolucao Autoeficacia (Pos - Pre)",
+        "UX SUS Q1", "UX SUS Q2", "UX SUS Q3", "UX SUS Q4", "UX SUS Q5",
+        "Usabilidade SUS Media (1-5)",
+        "Sugestoes"
+    ];
+
+    const rows = window.currentDevUsers.map(u => {
+        const prePct = (u.pre_test && typeof u.pre_test.percent === 'number') ? u.pre_test.percent : "";
+        const postPct = (u.post_test && typeof u.post_test.percent === 'number') ? u.post_test.percent : "";
+        const diffQuiz = (prePct !== "" && postPct !== "") ? (postPct - prePct) : "";
+
+        const effPreVals = [1,2,3,4].map(idx => u.pre_efficacy[idx]).filter(v => typeof v === 'number');
+        const effPreAvg = effPreVals.length > 0 ? (effPreVals.reduce((a,b)=>a+b,0) / effPreVals.length) : null;
+        
+        const effPostVals = [1,2,3,4].map(idx => u.post_efficacy[idx]).filter(v => typeof v === 'number');
+        const effPostAvg = effPostVals.length > 0 ? (effPostVals.reduce((a,b)=>a+b,0) / effPostVals.length) : null;
+        
+        const diffEff = (effPreAvg !== null && effPostAvg !== null) ? (effPostAvg - effPreAvg) : null;
+
+        let uxAvg = null;
+        if (u.ux) {
+            const uxVals = [u.ux.ux1, u.ux.ux2, u.ux.ux3, u.ux.ux4, u.ux.ux5].filter(v => typeof v === 'number');
+            if (uxVals.length > 0) {
+                uxAvg = uxVals.reduce((a,b)=>a+b, 0) / uxVals.length;
+            }
+        }
+
+        const fmtDec = (val) => {
+            if (val === null || val === undefined || isNaN(val)) return "";
+            return val.toFixed(2).replace('.', ',');
+        };
+
+        return [
+            u.user_id || "",
+            u.created_at ? new Date(u.created_at).toLocaleString('pt-BR') : "",
+            u.idade || "",
+            u.genero || "",
+            u.setor || "",
+            u.vinculo || "",
+            u.experiencia_previa || "",
+            u.pre_test?.score ?? "",
+            u.pre_test?.total ?? "",
+            prePct,
+            u.post_test?.score ?? "",
+            u.post_test?.total ?? "",
+            postPct,
+            diffQuiz,
+            (u.pre_efficacy[1] !== undefined && u.pre_efficacy[1] !== null) ? u.pre_efficacy[1] : "",
+            (u.pre_efficacy[2] !== undefined && u.pre_efficacy[2] !== null) ? u.pre_efficacy[2] : "",
+            (u.pre_efficacy[3] !== undefined && u.pre_efficacy[3] !== null) ? u.pre_efficacy[3] : "",
+            (u.pre_efficacy[4] !== undefined && u.pre_efficacy[4] !== null) ? u.pre_efficacy[4] : "",
+            fmtDec(effPreAvg),
+            (u.post_efficacy[1] !== undefined && u.post_efficacy[1] !== null) ? u.post_efficacy[1] : "",
+            (u.post_efficacy[2] !== undefined && u.post_efficacy[2] !== null) ? u.post_efficacy[2] : "",
+            (u.post_efficacy[3] !== undefined && u.post_efficacy[3] !== null) ? u.post_efficacy[3] : "",
+            (u.post_efficacy[4] !== undefined && u.post_efficacy[4] !== null) ? u.post_efficacy[4] : "",
+            fmtDec(effPostAvg),
+            fmtDec(diffEff),
+            (u.ux?.ux1 !== undefined && u.ux?.ux1 !== null) ? u.ux.ux1 : "",
+            (u.ux?.ux2 !== undefined && u.ux?.ux2 !== null) ? u.ux.ux2 : "",
+            (u.ux?.ux3 !== undefined && u.ux?.ux3 !== null) ? u.ux.ux3 : "",
+            (u.ux?.ux4 !== undefined && u.ux?.ux4 !== null) ? u.ux.ux4 : "",
+            (u.ux?.ux5 !== undefined && u.ux?.ux5 !== null) ? u.ux.ux5 : "",
+            fmtDec(uxAvg),
+            `"${(u.ux?.suggestions || "").replace(/"/g, '""')}"`
+        ];
+    });
+
+    // Padrão brasileiro de CSV (ponto e vírgula e BOM)
+    let csvContent = "\uFEFF";
+    csvContent += headers.join(";") + "\n";
+    csvContent += rows.map(r => r.join(";")).join("\n");
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `relatorio_pesquisa_sbv_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+};
+
+window.showDevDetails = (userId) => {
+    const user = window.allDeveloperUsers.find(u => u.user_id === userId);
+    if (!user) return;
+
+    const modal = document.getElementById('dev-details-modal');
+    const labelId = document.getElementById('dev-detail-userid');
+    const content = document.getElementById('dev-detail-content');
+
+    if (modal && labelId && content) {
+        labelId.innerText = `Sessão ID: ${user.user_id}`;
+        
+        let evolutionText = "—";
+        let evolutionClass = "text-purple-650 dark:text-purple-400";
+        if (user.pre_test && user.post_test && typeof user.pre_test.percent === 'number' && typeof user.post_test.percent === 'number') {
+            const diff = user.post_test.percent - user.pre_test.percent;
+            evolutionText = `${diff >= 0 ? '+' : ''}${diff}%`;
+            if (diff > 0) {
+                evolutionClass = "text-emerald-600 dark:text-emerald-500";
+            } else if (diff < 0) {
+                evolutionClass = "text-rose-600 dark:text-rose-455";
+            } else {
+                evolutionClass = "text-slate-500 dark:text-slate-400";
+            }
+        }
+        
+        // Build detail content
+        const preEffList = [1,2,3,4].map(idx => `<div class="flex justify-between border-b pb-2"><span>Questão ${idx}:</span><span class="font-black text-blue-700">${(user.pre_efficacy[idx] !== undefined && user.pre_efficacy[idx] !== null) ? user.pre_efficacy[idx] : '—'} / 5</span></div>`).join('');
+        const postEffList = [1,2,3,4].map(idx => `<div class="flex justify-between border-b pb-2"><span>Questão ${idx}:</span><span class="font-black text-rose-700">${(user.post_efficacy[idx] !== undefined && user.post_efficacy[idx] !== null) ? user.post_efficacy[idx] : '—'} / 5</span></div>`).join('');
+        const uxList = [1,2,3,4,5].map(idx => `<div class="flex justify-between border-b pb-2"><span>Escore UX ${idx}:</span><span class="font-black text-emerald-700">${(user.ux && user.ux[`ux${idx}`] !== undefined && user.ux[`ux${idx}`] !== null) ? user.ux[`ux${idx}`] : '—'} / 5</span></div>`).join('');
+
+        content.innerHTML = `
+            <div class="grid md:grid-cols-2 gap-6">
+                <!-- Coluna 1: Demografia e Testes -->
+                <div class="space-y-6 flex-1">
+                    <div class="bg-slate-50 dark:bg-slate-800 p-5 rounded-2xl border dark:border-slate-700">
+                        <h4 class="font-black text-sm uppercase text-slate-500 mb-3">1. Perfil Demográfico</h4>
+                        <div class="space-y-2 text-xs">
+                            <p><strong>Idade:</strong> ${user.idade ? user.idade + ' anos' : 'Não Informado'}</p>
+                            <p><strong>Gênero:</strong> ${user.genero || 'Não Informado'}</p>
+                            <p><strong>Setor:</strong> ${user.setor || 'Não Informado'}</p>
+                            <p><strong>Vínculo:</strong> ${user.vinculo || 'Não Informado'}</p>
+                            <p><strong>Experiência Prévia:</strong> ${user.experiencia_previa || 'Não Informado'}</p>
+                            <p><strong>Data de Entrada:</strong> ${user.created_at ? new Date(user.created_at).toLocaleString('pt-BR') : 'N/A'}</p>
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-slate-800 p-5 rounded-2xl border dark:border-slate-700">
+                        <h4 class="font-black text-sm uppercase text-slate-500 mb-3">2. Conhecimento Teórico (Quiz)</h4>
+                        <div class="space-y-2 text-xs">
+                            <p><strong>Pré-Teste (Baseline):</strong> ${user.pre_test ? `${user.pre_test.percent}% (${user.pre_test.score}/${user.pre_test.total})` : 'Não realizado'}</p>
+                            <p><strong>Pós-Teste (Exame Final):</strong> ${user.post_test ? `${user.post_test.percent}% (${user.post_test.score}/${user.post_test.total})` : 'Não realizado'}</p>
+                            <p><strong>Evolução:</strong> <span class="${evolutionClass} font-bold">${evolutionText}</span></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Coluna 2: Autoeficácia e UX -->
+                <div class="space-y-6 flex-1">
+                    <div class="bg-slate-50 dark:bg-slate-800 p-5 rounded-2xl border dark:border-slate-700">
+                        <h4 class="font-black text-sm uppercase text-slate-500 mb-3">3. Autoeficácia Pré-Treino</h4>
+                        <div class="space-y-2 text-xs">
+                            ${preEffList}
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-slate-800 p-5 rounded-2xl border dark:border-slate-700">
+                        <h4 class="font-black text-sm uppercase text-slate-500 mb-3">4. Autoeficácia Pós-Treino</h4>
+                        <div class="space-y-2 text-xs">
+                            ${postEffList}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-slate-50 dark:bg-slate-800 p-5 rounded-2xl border dark:border-slate-700 w-full mt-6">
+                <h4 class="font-black text-sm uppercase text-slate-500 mb-3">5. Escala de Usabilidade (UX/SUS)</h4>
+                <div class="grid md:grid-cols-2 gap-6 text-xs">
+                    <div class="space-y-2">
+                        ${uxList}
+                    </div>
+                    <div class="space-y-2">
+                        <p class="font-bold">Sugestões e Comentários:</p>
+                        <div class="p-3 bg-white dark:bg-slate-900 rounded-xl border dark:border-slate-850 italic min-h-[80px] text-xs">
+                            ${user.ux && user.ux.suggestions ? user.ux.suggestions : 'Nenhuma sugestão enviada.'}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+};
+
+window.deleteUserRecord = async (userId) => {
+    if (!confirm(`Deseja realmente excluir permanentemente o participante com ID "${userId}"? Isto apagará todas as respostas de testes, autoeficácia e usabilidade deste usuário do banco de dados.`)) {
+        return;
+    }
+
+    try {
+        const [
+            { error: errPart },
+            { error: errQuiz },
+            { error: errEff },
+            { error: errUx }
+        ] = await Promise.all([
+            window.supabaseClient.from('participantes').delete().eq('user_id', userId),
+            window.supabaseClient.from('quiz_attempts').delete().eq('user_id', userId),
+            window.supabaseClient.from('autoeficacia_usabilidade').delete().eq('user_id', userId),
+            window.supabaseClient.from('ux_evaluation').delete().eq('user_id', userId)
+        ]);
+
+        if (errPart || errQuiz || errEff || errUx) {
+            console.error("Erro ao deletar registro:", { errPart, errQuiz, errEff, errUx });
+            alert("Erro ao excluir do Supabase. Verifique se as políticas de exclusão (DELETE) foram habilitadas no console do Supabase.");
+            return;
+        }
+
+        alert("Participante excluído com sucesso!");
+        window.loadDeveloperData();
+    } catch (e) {
+        console.error("Exceção ao deletar registro:", e);
+        alert("Ocorreu um erro inesperado ao excluir o registro.");
+    }
+};
+
+window.closeDevDetailsModal = () => {
+    const modal = document.getElementById('dev-details-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    }
+};
+
+// Verifica na inicialização se há o parâmetro ?dev na URL
+if (new URLSearchParams(window.location.search).has('dev')) {
+    setTimeout(() => {
+        const password = prompt("Digite a senha de desenvolvedor para acessar o painel:");
+        if (password === "tccdev2026") {
+            window.showView('developer');
+        } else if (password !== null) {
+            alert("Senha incorreta!");
+        }
+    }, 800);
+}
+
+// Impedir fechamento acidental da página antes de concluir o pós-teste
+window.addEventListener('beforeunload', (e) => {
+    const hasTCLE = localStorage.getItem('study_tcle_accepted') === 'true';
+    const hasPostTest = localStorage.getItem('study_final_test_done') === 'true';
+    const isDev = localStorage.getItem('is_dev_user') === 'true';
+    
+    if (hasTCLE && !hasPostTest && !isDev) {
+        e.preventDefault();
+        e.returnValue = 'Realize o pós-teste para validar suas informações e ajudar no projeto de pesquisa.';
+        return e.returnValue;
+    }
+});
