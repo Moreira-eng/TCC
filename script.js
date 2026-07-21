@@ -471,6 +471,55 @@ window.switchChain = (t) => {
     }
 };
 
+window.getEloMediaHTML = (t, elo) => {
+    // Se houver ID do YouTube configurado
+    if (elo.youtubeId) {
+        return `
+            <div class="relative w-full h-full rounded-[2rem] overflow-hidden shadow-lg bg-black aspect-video min-h-[260px]">
+                <iframe class="absolute top-0 left-0 w-full h-full border-0" 
+                    src="https://www.youtube.com/embed/${elo.youtubeId}?rel=0&modestbranding=1" 
+                    title="${elo.title}" 
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                    allowfullscreen>
+                </iframe>
+            </div>
+        `;
+    }
+    // Se houver imagem local ou online configurada
+    if (elo.imageUrl) {
+        return `
+            <div class="w-full h-full rounded-[2rem] overflow-hidden shadow-md bg-slate-100 dark:bg-slate-800 min-h-[260px]">
+                <img src="${elo.imageUrl}" alt="${elo.title}" class="w-full h-full object-cover">
+            </div>
+        `;
+    }
+    
+    // Vetores SVG temáticos (fallback interativo e responsivo)
+    let svgIcon = "";
+    if (elo.id === 1 && t === 'extra') { // Acionamento Extra (Telefone/Ambulância)
+        svgIcon = `<svg class="w-20 h-20 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.94.725l.548 2.2a1 1 0 01-.321.988l-1.305.98a10.582 10.582 0 004.872 4.872l.98-1.305a1 1 0 01.988-.321l2.2.548a1 1 0 01.725.94V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path></svg>`;
+    } else if (elo.id === 1 && t === 'intra') { // Vigilância/Sinais Vitais
+        svgIcon = `<svg class="w-20 h-20 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 012-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>`;
+    } else if (elo.id === 2) { // RCP Precoce (Massagem Cardíaca / Mão sobre Peito)
+        svgIcon = `<svg class="w-20 h-20 text-red-500 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>`;
+    } else if (elo.id === 3) { // Desfibrilação (DEA / Eletricidade)
+        svgIcon = `<svg class="w-20 h-20 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>`;
+    } else if (elo.id === 4) { // Suporte Avançado / Carrinho (Suporte Profissional)
+        svgIcon = `<svg class="w-20 h-20 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>`;
+    } else if (elo.id === 5) { // Cuidados Pós-PCR (Cérebro/Escudo/Recuperação)
+        svgIcon = `<svg class="w-20 h-20 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>`;
+    } else { // Recuperação Geral
+        svgIcon = `<svg class="w-20 h-20 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
+    }
+
+    return `
+        <div class="w-full h-full flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-800/30 rounded-[2rem] border border-slate-150 dark:border-slate-800 transition-all text-center min-h-[260px]">
+            <div class="p-4 bg-white dark:bg-slate-900 rounded-full shadow-sm border border-slate-100 dark:border-slate-800/50 mb-3">${svgIcon}</div>
+            <p class="text-[10px] text-slate-400 dark:text-slate-500 font-bold max-w-[200px] leading-snug">Ilustração do Elo ${elo.id}. Adicione <code>youtubeId</code> ou <code>imageUrl</code> no código para carregar seu vídeo/foto.</p>
+        </div>
+    `;
+};
+
 window.toggleMobileElo = (index) => {
     const totalElos = 6;
     for (let i = 0; i < totalElos; i++) {
