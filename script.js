@@ -342,6 +342,12 @@ window.showView = (v) => {
     if(target) target.classList.add('active');
     if (v !== 'metronomo' && metroState.isRunning) window.stopMetronome();
     window.scrollTo(0,0);
+
+    // Fecha o menu lateral automaticamente ao navegar no celular
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar && !sidebar.classList.contains('-translate-x-full')) {
+        window.toggleSidebar();
+    }
 };
 
 window.toggleSidebar = () => {
@@ -350,14 +356,99 @@ window.toggleSidebar = () => {
 };
 
 window.switchChain = (t) => {
+    // 1. Renderização para Desktop
     const display = document.getElementById('chain-display');
-    if(!display) return;
-    display.innerHTML = protocolsData[t].map((e, i) => `<div onclick="window.showEloDetail('${t}', ${i})" class="cursor-pointer p-4 rounded-2xl ${e.color} text-white shadow-md hover:scale-105 transition-all text-center"><div class="text-[8px] font-black uppercase opacity-60 mb-1">Elo 0${e.id}</div><div class="font-black text-[9px] uppercase leading-tight">${e.title}</div></div>`).join('');
+    if (display) {
+        display.innerHTML = protocolsData[t].map((e, i) => `
+            <div id="desktop-elo-node-${i}" onclick="window.showEloDetail('${t}', ${i})" class="desktop-elo-node cursor-pointer p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-350 shadow-sm hover:scale-105 transition-all text-center">
+                <div class="text-[8px] font-black uppercase text-slate-400 dark:text-slate-500 mb-1">Elo 0${e.id}</div>
+                <div class="font-black text-[9px] uppercase leading-tight">${e.title}</div>
+            </div>
+        `).join('');
+    }
+
+    // 2. Renderização para Mobile (Sanfona/Acordeão com Timeline Vertical)
+    const displayMobile = document.getElementById('chain-display-mobile');
+    if (displayMobile) {
+        const isIntra = t === 'intra';
+        displayMobile.innerHTML = protocolsData[t].map((elo, i) => `
+            <div class="border border-slate-200 dark:border-slate-850 rounded-3xl overflow-hidden bg-white dark:bg-slate-900 shadow-sm transition-all duration-300">
+                <!-- Cabeçalho do Elo -->
+                <button onclick="window.toggleMobileElo(${i})" class="w-full flex items-center justify-between p-5 text-left focus:outline-none select-none">
+                    <div class="flex items-center gap-4">
+                        <div class="w-10 h-10 rounded-xl ${elo.color} text-white flex items-center justify-center font-black shadow-sm text-sm shrink-0">
+                            0${elo.id}
+                        </div>
+                        <div>
+                            <span class="text-[8px] font-black uppercase text-slate-400 dark:text-slate-500 block tracking-wider">Elo 0${elo.id}</span>
+                            <span class="font-black text-xs sm:text-sm text-slate-800 dark:text-slate-200 uppercase">${elo.title}</span>
+                        </div>
+                    </div>
+                    <!-- Ícone de seta -->
+                    <svg id="mobile-arrow-${i}" class="w-5 h-5 text-slate-400 transition-transform duration-300 transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                </button>
+                
+                <!-- Conteúdo Retrátil (Accordion) -->
+                <div id="mobile-content-${i}" class="max-h-0 overflow-hidden transition-all duration-500 ease-in-out bg-slate-50/50 dark:bg-slate-900/10">
+                    <div class="p-5 border-t border-slate-100 dark:border-slate-800/80 space-y-6">
+                        <!-- Mídia (Vídeo/Foto/SVG) -->
+                        <div class="w-full">
+                            ${window.getEloMediaHTML(t, elo)}
+                        </div>
+
+                        <!-- Passos do Algoritmo -->
+                        <div class="space-y-3">
+                            <p class="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">Algoritmo Técnico</p>
+                            ${elo.steps.map((s, idx) => `
+                                <div class="step-item font-medium text-xs text-slate-700 dark:text-slate-300">
+                                    <span class="step-number text-[10px] font-black ${isIntra ? '!bg-emerald-600' : '!bg-blue-700'}">${idx+1}</span>
+                                    ${s}
+                                </div>
+                            `).join('')}
+                        </div>
+
+                        <!-- Justificativa (Rationale) -->
+                        <div class="${isIntra ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-600 text-emerald-800 dark:text-emerald-400' : 'bg-blue-50 dark:bg-blue-950/20 border-blue-600 text-blue-800 dark:text-blue-400'} p-4 rounded-xl border-l-4 italic text-xs leading-relaxed">
+                            ${elo.rationale}
+                        </div>
+
+                        <!-- Prática do Mundo Real -->
+                        <div class="space-y-4 pt-2">
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs">❤️</span>
+                                <h5 class="text-xs font-black uppercase text-slate-800 dark:text-slate-350 tracking-tight">Execução no Mundo Real</h5>
+                            </div>
+                            <div class="space-y-3">
+                                <div class="practice-card p-5 rounded-2xl border-l-[6px] border-l-blue-600 shadow-sm">
+                                    <span class="text-[8px] font-black uppercase bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-400 px-2 py-0.5 rounded-full w-fit mb-2 block font-black">Profissional da Saúde</span>
+                                    <p class="text-xs text-slate-650 dark:text-slate-300 leading-relaxed italic font-medium">${elo.practice.pro}</p>
+                                </div>
+                                <div class="practice-card p-5 rounded-2xl border-l-[6px] border-l-emerald-600 shadow-sm">
+                                    <span class="text-[8px] font-black uppercase bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-full w-fit mb-2 block font-black">Não é da Saúde</span>
+                                    <p class="text-xs text-slate-650 dark:text-slate-300 leading-relaxed italic font-medium">${elo.practice.nonpro}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
     const be = document.getElementById('btn-extra');
     const bi = document.getElementById('btn-intra');
-    if(be) be.className = t === 'extra' ? 'px-8 py-3 rounded-xl font-bold bg-blue-700 text-white shadow-lg' : 'px-8 py-3 rounded-xl font-bold text-slate-500 border border-slate-200';
-    if(bi) bi.className = t === 'intra' ? 'px-8 py-3 rounded-xl font-bold bg-emerald-600 text-white shadow-lg' : 'px-8 py-3 rounded-xl font-bold text-slate-500 border border-slate-200';
+    if(be) be.className = t === 'extra' ? 'px-8 py-3 rounded-xl font-bold bg-blue-700 text-white shadow-lg' : 'px-8 py-3 rounded-xl font-bold text-slate-500 border border-slate-200 dark:border-slate-800';
+    if(bi) bi.className = t === 'intra' ? 'px-8 py-3 rounded-xl font-bold bg-emerald-600 text-white shadow-lg' : 'px-8 py-3 rounded-xl font-bold text-slate-500 border border-slate-200 dark:border-slate-800';
+    
+    // Inicializa a exibição de detalhes no desktop e mobile
     window.showEloDetail(t, 0);
+
+    // No mobile, expande o primeiro Elo por padrão
+    setTimeout(() => {
+        window.toggleMobileElo(0);
+    }, 100);
 
     // Update Flow navigation Destination
     const btnNextTeoria = document.getElementById('btn-next-teoria');
@@ -380,53 +471,31 @@ window.switchChain = (t) => {
     }
 };
 
-window.getEloMediaHTML = (t, elo) => {
-    // Se houver ID do YouTube configurado
-    if (elo.youtubeId) {
-        return `
-            <div class="relative w-full h-full rounded-[2rem] overflow-hidden shadow-lg bg-black aspect-video min-h-[260px]">
-                <iframe class="absolute top-0 left-0 w-full h-full border-0" 
-                    src="https://www.youtube.com/embed/${elo.youtubeId}?rel=0&modestbranding=1" 
-                    title="${elo.title}" 
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-                    allowfullscreen>
-                </iframe>
-            </div>
-        `;
-    }
-    // Se houver imagem local ou online configurada
-    if (elo.imageUrl) {
-        return `
-            <div class="w-full h-full rounded-[2rem] overflow-hidden shadow-md bg-slate-100 dark:bg-slate-800 min-h-[260px]">
-                <img src="${elo.imageUrl}" alt="${elo.title}" class="w-full h-full object-cover">
-            </div>
-        `;
-    }
-    
-    // Vetores SVG temáticos (fallback interativo e responsivo)
-    let svgIcon = "";
-    if (elo.id === 1 && t === 'extra') { // Acionamento Extra (Telefone/Ambulância)
-        svgIcon = `<svg class="w-20 h-20 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.94.725l.548 2.2a1 1 0 01-.321.988l-1.305.98a10.582 10.582 0 004.872 4.872l.98-1.305a1 1 0 01.988-.321l2.2.548a1 1 0 01.725.94V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path></svg>`;
-    } else if (elo.id === 1 && t === 'intra') { // Vigilância/Sinais Vitais
-        svgIcon = `<svg class="w-20 h-20 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 012-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>`;
-    } else if (elo.id === 2) { // RCP Precoce (Massagem Cardíaca / Mão sobre Peito)
-        svgIcon = `<svg class="w-20 h-20 text-red-500 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>`;
-    } else if (elo.id === 3) { // Desfibrilação (DEA / Eletricidade)
-        svgIcon = `<svg class="w-20 h-20 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>`;
-    } else if (elo.id === 4) { // Suporte Avançado / Carrinho (Suporte Profissional)
-        svgIcon = `<svg class="w-20 h-20 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>`;
-    } else if (elo.id === 5) { // Cuidados Pós-PCR (Cérebro/Escudo/Recuperação)
-        svgIcon = `<svg class="w-20 h-20 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>`;
-    } else { // Recuperação Geral
-        svgIcon = `<svg class="w-20 h-20 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
-    }
+window.toggleMobileElo = (index) => {
+    const totalElos = 6;
+    for (let i = 0; i < totalElos; i++) {
+        const content = document.getElementById(`mobile-content-${i}`);
+        const arrow = document.getElementById(`mobile-arrow-${i}`);
+        if (!content || !arrow) continue;
 
-    return `
-        <div class="w-full h-full flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-800/30 rounded-[2rem] border border-slate-150 dark:border-slate-800 transition-all text-center min-h-[260px]">
-            <div class="p-4 bg-white dark:bg-slate-900 rounded-full shadow-sm border border-slate-100 dark:border-slate-800/50 mb-3">${svgIcon}</div>
-            <p class="text-[10px] text-slate-400 dark:text-slate-500 font-bold max-w-[200px] leading-snug">Ilustração do Elo ${elo.id}. Adicione <code>youtubeId</code> ou <code>imageUrl</code> no código para carregar seu vídeo/foto.</p>
-        </div>
-    `;
+        if (i === index) {
+            const isOpen = content.style.maxHeight && content.style.maxHeight !== '0px';
+            if (isOpen) {
+                content.style.maxHeight = '0px';
+                arrow.classList.remove('rotate-180');
+            } else {
+                content.style.maxHeight = content.scrollHeight + 'px';
+                arrow.classList.add('rotate-180');
+                // Scroll suave após o efeito
+                setTimeout(() => {
+                    content.parentElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }, 300);
+            }
+        } else {
+            content.style.maxHeight = '0px';
+            arrow.classList.remove('rotate-180');
+        }
+    }
 };
 
 window.showEloDetail = (t, i) => {
@@ -434,6 +503,16 @@ window.showEloDetail = (t, i) => {
     const content = document.getElementById('detail-content');
     if(!content) return;
     const isIntra = t === 'intra';
+
+    // Highlight active node in desktop chain display
+    document.querySelectorAll('.desktop-elo-node').forEach((node, idx) => {
+        if (idx === i) {
+            node.className = `desktop-elo-node cursor-pointer p-4 rounded-2xl ${elo.color} text-white shadow-lg scale-105 border-transparent transition-all text-center`;
+        } else {
+            node.className = `desktop-elo-node cursor-pointer p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-350 shadow-sm hover:scale-105 transition-all text-center`;
+        }
+    });
+
     content.innerHTML = `
         <div class="flex flex-col lg:flex-row gap-12 items-center transition-all animate-in slide-in-from-left">
             <div class="lg:w-1/2 text-left w-full">
@@ -458,11 +537,11 @@ window.showEloDetail = (t, i) => {
             <div class="grid md:grid-cols-2 gap-4">
                 <div class="practice-card p-8 rounded-[2.5rem] border-l-[10px] border-l-blue-700 shadow-sm flex flex-col">
                     <span class="text-[10px] font-black uppercase bg-blue-100 text-blue-700 px-3 py-1 rounded-full w-fit mb-4">Profissional da Saúde</span>
-                    <p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed italic font-medium">${elo.practice.pro}</p>
+                    <p class="text-sm text-slate-650 dark:text-slate-300 leading-relaxed italic font-medium">${elo.practice.pro}</p>
                 </div>
                 <div class="practice-card p-8 rounded-[2.5rem] border-l-[10px] border-l-emerald-600 shadow-sm flex flex-col">
                     <span class="text-[10px] font-black uppercase bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full w-fit mb-4">Não é da Saúde</span>
-                    <p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed italic font-medium">${elo.practice.nonpro}</p>
+                    <p class="text-sm text-slate-650 dark:text-slate-300 leading-relaxed italic font-medium">${elo.practice.nonpro}</p>
                 </div>
             </div>
         </div>`;
