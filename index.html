@@ -192,14 +192,14 @@
         </p>
     </div>
 
-    <main class="max-w-7xl mx-auto px-4 py-12">
+    <main class="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-12">
         
         <!-- VIEW: TCLE -->
         <section id="view-tcle" class="view-section">
             <div class="bg-white dark:bg-slate-900 rounded-[2rem] sm:rounded-[3rem] md:rounded-[4rem] p-5 sm:p-10 md:p-16 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden relative transition-all flex flex-col">
                 <h2 class="text-3xl lg:text-4xl font-black text-blue-900 dark:text-blue-400 mb-2">Termo de Consentimento</h2>
                 <p class="text-slate-500 mb-6 text-sm">Por favor, leia atentamente as informações abaixo antes de participar da pesquisa.</p>
-                <div id="tcle-content" class="flex-1 overflow-y-auto mb-6 p-6 lg:p-8 bg-slate-50 dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm leading-relaxed custom-scrollbar relative max-h-[50vh]">
+                <div id="tcle-content" onscroll="window.checkTCLEScroll()" class="flex-1 overflow-y-auto mb-6 p-6 lg:p-8 bg-slate-50 dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm leading-relaxed custom-scrollbar relative max-h-[50vh]">
                     <p class="mb-2 text-center font-black text-slate-900 dark:text-white uppercase tracking-wide">UNIVERSIDADE FEDERAL DE SERGIPE</p>
                     <p class="mb-4 text-center font-bold text-slate-700 dark:text-slate-300 text-xs uppercase">DEPARTAMENTO DE MEDICINA DE LAGARTO</p>
                     <p class="mb-4 text-center font-black text-blue-900 dark:text-blue-400">TERMO DE CONSENTIMENTO LIVRE E ESCLARECIDO PARA PESQUISAS EM AMBIENTE VIRTUAL</p>
@@ -268,7 +268,7 @@
                             <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                             Baixar
                         </button>
-                        <button id="btn-accept-tcle" onclick="window.acceptTCLE()" class="bg-blue-600 text-white px-8 py-4 rounded-2xl font-black uppercase shadow-xl transition-all w-full sm:w-auto hover:scale-105 active:scale-95">Li e Aceito Participar</button>
+                        <button id="btn-accept-tcle" disabled onclick="window.acceptTCLE()" class="bg-blue-600 text-white px-8 py-4 rounded-2xl font-black uppercase shadow-xl transition-all w-full sm:w-auto hover:scale-105 active:scale-95 opacity-50 cursor-not-allowed">Li e Aceito Participar</button>
                     </div>
                 </div>
             </div>
@@ -510,11 +510,11 @@
         <section id="view-introducao" class="view-section">
             <div class="max-w-5xl mx-auto space-y-16 transition-all">
                 <div class="text-center transition-all">
-                    <h2 class="text-5xl font-black text-blue-900 dark:text-blue-400 mb-4 uppercase tracking-tighter italic transition-colors transition-all">Fundamentos do SBV</h2>
+                    <h2 class="text-3xl sm:text-4xl md:text-5xl font-black text-blue-900 dark:text-blue-400 mb-4 uppercase tracking-tighter italic transition-colors transition-all">Fundamentos do SBV</h2>
                     <p class="text-slate-500 dark:text-slate-400 text-lg transition-colors transition-all">O suporte básico como sistema de estabilização humana.</p>
                 </div>
 
-                <div class="bg-white dark:bg-slate-900 p-10 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-800 border-l-[12px] border-l-blue-700 transition-all">
+                <div class="bg-white dark:bg-slate-900 p-5 sm:p-10 rounded-[2rem] sm:rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-800 border-l-[6px] sm:border-l-[12px] border-l-blue-700 transition-all">
                     <h3 class="text-2xl font-black text-blue-900 dark:text-blue-400 mb-6 transition-colors transition-all">Definição Holística</h3>
                     <p class="text-slate-600 dark:text-slate-400 text-lg leading-relaxed font-medium mb-8 transition-colors transition-all">O Suporte Básico de Vida (SBV) é um ecossistema de ações primárias que visam garantir a oxigenação e circulação mínimas para os órgãos vitais. Ele não trata apenas do coração; trata de qualquer **obstrução ou falha súbita** na manutenção da vida.</p>
                     <div class="grid md:grid-cols-2 gap-6 transition-all">
@@ -530,11 +530,11 @@
                 </div>
 
                 <div class="grid md:grid-cols-2 gap-8 transition-all">
-                    <div class="bg-blue-900 dark:bg-slate-900 text-white p-10 rounded-[3.5rem] shadow-xl transition-all">
+                    <div class="bg-blue-900 dark:bg-slate-900 text-white p-5 sm:p-10 rounded-[2rem] sm:rounded-[3.5rem] shadow-xl transition-all">
                         <h4 class="text-blue-300 dark:text-blue-400 font-black text-xs uppercase mb-4 transition-colors transition-all">Morte Clínica vs. Biológica</h4>
                         <p class="text-blue-100 dark:text-slate-400 text-sm leading-relaxed mb-6 font-medium transition-colors transition-all">No instante da falha cardíaca ou respiratória, ocorre a <strong>Morte Clínica</strong> (estado reversível). Após 4-6 min sem O2, inicia-se a morte neuronal massiva. Aos 10 min, instala-se a <strong>Morte Biológica</strong> (irreversível). O SBV é a ponte biológica para manter a reversibilidade.</p>
                     </div>
-                    <div class="bg-white dark:bg-slate-900 p-10 rounded-[3.5rem] card-shadow border border-slate-100 dark:border-slate-800 transition-all">
+                    <div class="bg-white dark:bg-slate-900 p-5 sm:p-10 rounded-[2rem] sm:rounded-[3.5rem] card-shadow border border-slate-100 dark:border-slate-800 transition-all">
                         <h4 class="text-blue-700 dark:text-blue-400 font-black text-xs uppercase mb-4 transition-colors transition-all">A Regra de Ouro</h4>
                         <p class="text-slate-500 dark:text-slate-400 text-sm leading-relaxed transition-colors transition-all">"Tempo é Cérebro". O SBV atua como uma bomba externa. Sem compressões torácicas ou desengasgo rápido, o suporte avançado muitas vezes chega tarde demais para salvar a função cognitiva da vítima.</p>
                     </div>
@@ -563,12 +563,12 @@
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
                         <span>Regra Número Um</span>
                     </div>
-                    <h2 class="text-5xl font-black text-slate-900 dark:text-white mb-4 uppercase tracking-tighter italic">Segurança da Cena</h2>
+                    <h2 class="text-3xl sm:text-4xl md:text-5xl font-black text-slate-900 dark:text-white mb-4 uppercase tracking-tighter italic">Segurança da Cena</h2>
                     <p class="text-slate-500 dark:text-slate-400 text-lg">O socorrista não pode se tornar a próxima vítima.</p>
                 </div>
 
 
-                <div class="bg-white dark:bg-slate-900 p-10 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-800 border-l-[12px] border-l-rose-600 transition-all">
+                <div class="bg-white dark:bg-slate-900 p-5 sm:p-10 rounded-[2rem] sm:rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-800 border-l-[6px] sm:border-l-[12px] border-l-rose-600 transition-all">
                     <h3 class="text-2xl font-black text-rose-700 dark:text-rose-400 mb-6">A Prioridade Absoluta</h3>
                     <p class="text-slate-600 dark:text-slate-400 text-lg leading-relaxed font-medium mb-8">Antes de tocar na vítima, você deve realizar uma varredura visual de 360º. O Suporte Básico de Vida começa com a **preservação do socorrista**. Se o local não for seguro, o atendimento não deve ser iniciado.</p>
                    
@@ -589,7 +589,7 @@
                 </div>
 
 
-                <div class="bg-rose-700 text-white p-12 rounded-[4rem] shadow-2xl relative overflow-hidden">
+                <div class="bg-rose-700 text-white p-5 sm:p-12 rounded-[2rem] sm:rounded-[3rem] md:rounded-[4rem] shadow-2xl relative overflow-hidden">
                     <div class="absolute top-0 right-0 p-8 opacity-10">
                         <svg class="w-32 h-32" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
                     </div>
@@ -853,7 +853,7 @@
         <section id="view-teoria" class="view-section">
             <div class="max-w-5xl mx-auto">
                 <div class="mb-12">
-                    <h2 class="text-4xl font-black text-blue-900 dark:text-blue-400 mb-4 uppercase tracking-tighter italic text-center transition-colors">Protocolos de Atendimento</h2>
+                    <h2 class="text-3xl sm:text-4xl font-black text-blue-900 dark:text-blue-400 mb-4 uppercase tracking-tighter italic text-center transition-colors">Protocolos de Atendimento</h2>
                     <div class="flex gap-4 mt-8 overflow-x-auto pb-4 justify-center transition-all">
                         <button onclick="window.switchChain('extra')" id="btn-extra" class="whitespace-nowrap px-8 py-3 rounded-xl font-bold transition-all bg-blue-700 text-white shadow-lg">Extra-hospitalar (PCREH)</button>
                         <button onclick="window.switchChain('intra')" id="btn-intra" class="whitespace-nowrap px-8 py-3 rounded-xl font-bold transition-all text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-800">Intra-hospitalar (PCRIH)</button>
@@ -863,13 +863,17 @@
                         </button>
                     </div>
                 </div>
-                <div id="chain-display" class="grid grid-cols-3 md:grid-cols-6 gap-3 mb-12 transition-all"></div>
-                <div id="link-details" class="bg-white dark:bg-slate-900 rounded-[3rem] p-10 border border-slate-100 dark:border-slate-800 shadow-xl min-h-[500px] transition-all">
-                    <div id="detail-content" class="flex flex-col gap-12 transition-all">
-                        <div class="flex flex-col lg:flex-row gap-12 items-center justify-center text-slate-300 dark:text-slate-700 italic transition-colors">
-                            Selecione um elo acima para carregar o plano de ação técnico.
-                        </div>
+                <!-- DESKTOP CHAIN VIEW (Visible on MD and larger screens) -->
+                <div class="hidden md:block">
+                    <div id="chain-display" class="grid grid-cols-6 gap-4 mb-8 transition-all"></div>
+                    <div id="link-details" class="bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 lg:p-12 border border-slate-150 dark:border-slate-800 shadow-xl min-h-[450px] transition-all">
+                        <div id="detail-content" class="transition-all"></div>
                     </div>
+                </div>
+
+                <!-- MOBILE CHAIN VIEW (Accordion style for small screens) -->
+                <div id="chain-display-mobile" class="block md:hidden space-y-4">
+                    <!-- Renders dynamically in script.js -->
                 </div>
             </div>
 
@@ -891,7 +895,7 @@
         <section id="view-diferencas" class="view-section">
             <div class="max-w-6xl mx-auto space-y-12 transition-all">
                 <div class="text-center transition-all">
-                    <h2 class="text-5xl font-black text-blue-900 dark:text-blue-400 mb-4 uppercase tracking-tighter italic transition-colors transition-all">Extensão: Especificidades por Idade</h2>
+                    <h2 class="text-3xl sm:text-4xl md:text-5xl font-black text-blue-900 dark:text-blue-400 mb-4 uppercase tracking-tighter italic transition-colors transition-all">Extensão: Especificidades por Idade</h2>
                     <p class="text-slate-500 dark:text-slate-400 text-lg transition-colors transition-all">Adaptações críticas no algoritmo de PCR conforme o desenvolvimento biológico.</p>
                 </div>
 
@@ -1140,12 +1144,12 @@
         <!-- VIEW: SBV PARA LEIGOS -->
         <section id="view-leigos" class="view-section">
             <div class="max-w-5xl mx-auto space-y-16 transition-all">
-                <div class="bg-blue-950 dark:bg-slate-900 rounded-[4rem] p-12 md:p-24 text-white shadow-2xl relative overflow-hidden transition-all">
+                <div class="bg-blue-950 dark:bg-slate-900 rounded-[2rem] sm:rounded-[3rem] md:rounded-[4rem] p-5 sm:p-12 md:p-24 text-white shadow-2xl relative overflow-hidden transition-all">
                     <div class="absolute inset-0 illustration-grid opacity-5 pointer-events-none transition-colors"></div>
                     <div class="relative z-10 space-y-12 transition-all">
                         <div class="text-center transition-all">
                             <div class="inline-block px-3 py-1 bg-white/10 text-blue-200 text-[10px] font-black uppercase tracking-widest rounded-full mb-6 border border-white/20">Protocolo AHA 2025 (Hands-only)</div>
-                            <h2 class="text-5xl font-black italic mb-6 transition-colors">O Cidadão é a Única <br><span class="text-blue-500 transition-colors">Ponte para a Vida</span>.</h2>
+                            <h2 class="text-3xl sm:text-4xl md:text-5xl font-black italic mb-6 transition-colors">O Cidadão é a Única <br><span class="text-blue-500 transition-colors">Ponte para a Vida</span>.</h2>
                             <p class="text-blue-100 dark:text-slate-400 text-xl font-light transition-colors">A ambulância leva 10 minutos. O cérebro morre em 4. Você é o único socorro possível na janela crítica.</p>
                         </div>
 
@@ -1163,7 +1167,7 @@
                 </div>
 
                 <div class="grid md:grid-cols-2 gap-8 transition-all">
-                    <div class="bg-white dark:bg-slate-900 p-10 rounded-[4rem] card-shadow border border-emerald-100 dark:border-slate-800 transition-all">
+                    <div class="bg-white dark:bg-slate-900 p-5 sm:p-10 rounded-[2rem] sm:rounded-[4rem] card-shadow border border-emerald-100 dark:border-slate-800 transition-all">
                         <div class="flex items-center space-x-4 mb-8 transition-colors">
                             <div class="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center font-black text-xl transition-colors">✓</div>
                             <h3 class="text-2xl font-black text-emerald-900 dark:text-emerald-400 transition-colors">O Que Fazer</h3>
@@ -1175,7 +1179,7 @@
                             <li class="flex items-start space-x-3 transition-colors"><strong>DEA:</strong> Ligue o aparelho e siga estritamente as ordens de voz.</li>
                         </ul>
                     </div>
-                    <div class="bg-white dark:bg-slate-900 p-10 rounded-[4rem] card-shadow border border-rose-100 dark:border-slate-800 transition-all">
+                    <div class="bg-white dark:bg-slate-900 p-5 sm:p-10 rounded-[2rem] sm:rounded-[4rem] card-shadow border border-rose-100 dark:border-slate-800 transition-all">
                         <div class="flex items-center space-x-4 mb-8 transition-colors">
                             <div class="w-12 h-12 bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-2xl flex items-center justify-center font-black text-xl transition-colors">✕</div>
                             <h3 class="text-2xl font-black text-rose-900 dark:text-rose-400 transition-colors">O Que NÃO Fazer</h3>
@@ -1208,11 +1212,11 @@
         <section id="view-dea" class="view-section">
             <div class="max-w-6xl mx-auto space-y-16">
                 <div class="text-center transition-all">
-                    <h2 class="text-5xl font-black text-blue-900 dark:text-blue-400 mb-4 uppercase tracking-tighter italic">Uso do DEA</h2>
+                    <h2 class="text-3xl sm:text-4xl md:text-5xl font-black text-blue-900 dark:text-blue-400 mb-4 uppercase tracking-tighter italic">Uso do DEA</h2>
                     <p class="text-slate-500 dark:text-slate-400 text-lg">Desfibrilador Externo Automático: A inteligência que salva vidas.</p>
                 </div>
 
-                <div class="bg-white dark:bg-slate-900 p-10 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-800 border-l-[12px] border-l-blue-600">
+                <div class="bg-white dark:bg-slate-900 p-5 sm:p-10 rounded-[2rem] sm:rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-800 border-l-[6px] sm:border-l-[12px] border-l-blue-600">
                     <h3 class="text-3xl font-black text-slate-900 dark:text-white mb-10 uppercase italic">Guia Passo a Passo</h3>
                     
                     <div class="space-y-8">
@@ -1301,11 +1305,11 @@
         <section id="view-duvidas" class="view-section">
             <div class="max-w-4xl mx-auto space-y-12">
                 <div class="text-center space-y-4">
-                    <h2 class="text-5xl font-black text-blue-900 dark:text-blue-400 uppercase tracking-tighter italic">Mitos x Verdades</h2>
+                    <h2 class="text-3xl sm:text-4xl md:text-5xl font-black text-blue-900 dark:text-blue-400 uppercase tracking-tighter italic">Mitos x Verdades</h2>
                     <p class="text-slate-500 dark:text-slate-400 text-lg">Desconstruindo conceitos errados que podem custar vidas.</p>
                 </div>
 
-                <div class="bg-white dark:bg-slate-900 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-800 p-8 md:p-12 space-y-4">
+                <div class="bg-white dark:bg-slate-900 rounded-[2rem] sm:rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-800 p-5 sm:p-10 md:p-12 space-y-4">
                     
                     <!-- ITEM 1 -->
                     <div class="accordion-item border-b border-slate-100 dark:border-slate-800">
@@ -1389,13 +1393,13 @@
 
         <!-- VIEW: SIMULAÇÃO PRÁTICA -->
         <section id="view-pratica" class="view-section">
-            <div class="bg-white dark:bg-slate-900 rounded-[4rem] p-10 md:p-20 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden relative transition-all">
+            <div class="bg-white dark:bg-slate-900 rounded-[2rem] sm:rounded-[3rem] md:rounded-[4rem] p-5 sm:p-10 md:p-20 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden relative transition-all">
                 <div class="absolute inset-0 illustration-grid opacity-20 pointer-events-none transition-all"></div>
                 <div id="quiz-intro" class="text-center relative z-10 transition-colors transition-all">
                     <div class="w-24 h-24 medical-blue rounded-3xl mx-auto mb-8 flex items-center justify-center text-white shadow-2xl shadow-blue-200 dark:shadow-none transition-all">
                         <svg class="w-12 h-12 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path></svg>
                     </div>
-                    <h2 class="text-5xl font-black text-blue-900 dark:text-blue-400 mb-4 uppercase tracking-tighter italic transition-colors transition-all">Simulador Analítico</h2>
+                    <h2 class="text-3xl sm:text-4xl md:text-5xl font-black text-blue-900 dark:text-blue-400 mb-4 uppercase tracking-tighter italic transition-colors transition-all">Simulador Analítico</h2>
                     <p class="text-slate-500 dark:text-slate-400 mb-10 text-lg max-w-md mx-auto transition-colors transition-all">Suas decisões aqui definem sua curva de aprendizado. Responda com foco total.</p>
                     <button onclick="window.startQuiz()" class="bg-blue-700 text-white px-16 py-6 rounded-[2rem] font-black text-xl hover:scale-105 transition-all shadow-xl shadow-blue-200 dark:shadow-none transition-all">Iniciar Ciclo</button>
                     <div class="mt-6">
@@ -1694,7 +1698,7 @@
                     <p class="text-slate-500 dark:text-slate-400 text-lg transition-colors transition-all">Mantenha o ritmo ideal (100-120 BPM) para garantir perfusão máxima.</p>
                 </div>
 
-                <div class="bg-blue-900 dark:bg-slate-900 rounded-[4rem] p-10 md:p-20 text-white shadow-2xl relative overflow-hidden flex flex-col lg:flex-row gap-16 items-center transition-all">
+                <div class="bg-blue-900 dark:bg-slate-900 rounded-[2rem] sm:rounded-[3rem] md:rounded-[4rem] p-5 sm:p-10 md:p-20 text-white shadow-2xl relative overflow-hidden flex flex-col lg:flex-row gap-8 lg:gap-16 items-center transition-all">
                     <div class="absolute inset-0 illustration-grid opacity-5 pointer-events-none transition-all"></div>
                     
                     <div class="relative z-10 lg:w-1/2 space-y-8 transition-all">
